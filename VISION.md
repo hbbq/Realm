@@ -213,9 +213,23 @@ The web application provides direct access to exact state that does not require 
 - campaign information
 - a human-readable journal
 
-Chat remains primarily the interface to the game world and game master. The companion UI is the interface to exact state and game management.
+The companion web application is intended to eventually become the primary player interface, combining conversation with the game master and direct access to exact game state. The player should be able to remain in one interface while talking to the DM, inspecting the character, inventory and journal, and responding to future interactive game requests.
+
+During initial development, DM conversation may use Resident's existing Telegram transport through a dedicated bot. This provides a working player-to-DM channel without making messaging a prerequisite for Realm itself. The companion web application can initially focus on state and game management, then later take over the conversation experience.
+
+Telegram and other messaging transports belong to Resident rather than Realm. Realm should not need Telegram-specific knowledge.
 
 The journal is a human-readable representation derived from authoritative state/events. It is not itself the source of truth.
+
+### Visual game material
+
+The companion web application may later act as a visual window into the game world as well as a state and conversation interface.
+
+A DM Resident may be able to generate visual representations of established characters, locations, items or scenes. Realm can associate those assets with the relevant game and domain entities so the companion UI can present them during play and reuse established representations later.
+
+Generated images are representations of canonical state, not authoritative state by themselves. Important facts shown or implied by an image should still be represented explicitly in Realm when they matter to mechanics or continuity.
+
+Visual generation, asset management and presentation are future features rather than requirements for the initial version.
 
 ## Resident integration
 
@@ -254,7 +268,9 @@ The architecture should avoid unnecessarily preventing these features, but they 
 - multiple Resident participants in one game
 - selected NPCs represented by their own Resident instances
 - NPC-specific private knowledge and memory
-- richer maps, portraits and other visual game material
+- AI-generated portraits, locations, items, scene images and other visual game material
+- persistent per-game assets associated with Realm entities
+- DM conversation integrated directly into the companion web application
 - dynamically selecting games rather than configuring one GameId
 - additional or campaign-specific rule modules
 
