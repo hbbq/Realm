@@ -411,6 +411,43 @@ Beliefs should initially remain actor-scoped semantic propositions. Realm does n
 
 If such distinctions later become important to gameplay, they can be materialized then.
 
+### Observation, evidence, and inference
+
+Realm should distinguish what exists, what an actor has directly encountered, and what that actor or the player concludes from it.
+
+```text
+WORLD
+  What exists and what is actually true.
+
+OBSERVATION
+  What an actor directly encounters or is shown.
+
+KNOWLEDGE
+  Semantic canon that has become established as known to an actor.
+
+INFERENCE
+  What an actor or player concludes from observations and knowledge.
+```
+
+Realm should not automatically turn evidence into conclusions. If the player finds a bloodstained cloth beneath Tomas's bed, that does not establish that the player knows Tomas killed Aldren. The cloth is an Item in world state. Finding it can produce an observation event. Further investigation might establish and reveal a narrower Fact such as "the blood on the cloth belongs to Aldren." The causal conclusion remains for the player or Keeper to reason about unless it is independently established.
+
+Likewise, `reveal_fact` is appropriate when semantic information is actually communicated or discovered, but not as a generic consequence of seeing an entity.
+
+Observation can initially be represented through durable history rather than another complete actor-state model:
+
+```text
+EntityObserved
+  actor: player
+  entity: bloody_cloth
+  time: Day 2 14:32
+```
+
+This lets Keeper recover that an actor has previously encountered something without Realm maintaining an epistemic snapshot of all mutable state.
+
+"Clue" and "evidence" should not initially be fundamental Realm entity types. They are contextual roles that ordinary world objects, facts, events, statements, or observations can play. The same Item may be irrelevant in one context and crucial evidence in another.
+
+**Principle:** Realm stores reality and selectively stores acquired information. Keeper presents observations. Players and actors make inferences. Evidence is a role in reasoning, not necessarily a distinct kind of world object.
+
 ## 6. Lazy materialization
 
 Realm does not require the entire world to be defined before play.
