@@ -86,7 +86,197 @@ A building can remain a Place rather than requiring a separate fundamental type.
 
 The exact set of required properties and components remains to be worked out per entity kind.
 
-## 3. Current state and canon
+## 3. Initial entity semantics
+
+The fundamental entity kinds should remain deliberately thin. An entity does not need to carry every mechanical property it might someday require. Mechanical components can be materialized when play enters the relevant domain.
+
+### Place
+
+A Place represents somewhere entities can physically be located. Regions, settlements, buildings, rooms, roads, and wilderness areas can all be Places at different scales.
+
+A Place should have stable identity and may be contained by another Place:
+
+```yaml
+id: blackmere_courtyard
+type: place
+name: Blackmere Courtyard
+parent: blackmere_castle
+```
+
+Containment, connectivity, and travel are separate concepts. Two Places may be connected without one containing the other. A connection may optionally reference a stateful portal such as a door and may carry guidance such as typical travel time.
+
+Stored travel information informs Keeper's ruling; the authoritative result is the actual movement and time advancement Keeper commits.
+
+Places should not duplicate lists of their contents. Contents are derived from the containment relation.
+
+### Physical containment
+
+Physical location and possession should use one authoritative containment model rather than duplicating state as `location`, `inventory`, and `contents`.
+
+Conceptually:
+
+```text
+blackmere_castle
+└── courtyard
+    ├── Elin
+    │   └── backpack
+    │       └── silver_key
+    └── wooden_chest
+        └── old_sword
+```
+
+A physical entity has at most one immediate containment parent. The parent may be a Place or another entity capable of containing it. Realm derives indirect physical location by following the containment chain.
+
+Containment must not contain cycles.
+
+Inventory is therefore a view over containment rather than independent state. Direct inventory consists of immediate children of a Creature; nested inventory includes descendants such as items inside a carried backpack.
+
+Ownership is conceptually separate from physical possession. An item may be physically carried by one Creature while canonically belonging to another. Ownership does not need to become a hard mechanical relation until gameplay requires it.
+
+Visibility and accessibility are also separate from containment. A key may physically be inside a backpack in the current room without being visible or immediately accessible to another actor.
+
+**Principle:** every physical entity has at most one containment parent. Containment represents where it physically is, directly or indirectly. Ownership, knowledge, visibility, and mechanical use are separate concerns.
+
+### Connections
+
+Connections describe traversability or spatial relationships between Places.
+
+A connection may contain information such as:
+
+```yaml
+from: blackmere_courtyard
+to: western_tower
+bidirectional: true
+portal: western_tower_door
+typical_travel_time: 1 minute
+```
+
+A physical portal can be its own entity when its state matters. For example, a door may have openable and lockable components. A forest path may connect two Places without any portal entity.
+
+Connections must reference existing Places. Traversal through a stateful portal must respect the portal's authoritative state unless Keeper explicitly resolves an action that changes that state.
+
+### Item
+
+An Item is a persistent physical object. Its core representation can remain small:
+
+```yaml
+id: silver_key
+type: item
+name: Silver Key
+contained_by: elin_backpack
+quantity: 1
+active: true
+```
+
+Items gain structured components only when recurring mechanics require them. Candidate early components include `container`, `openable`, `lockable`, and `weapon`.
+
+For example:
+
+```yaml
+components:
+  container: {}
+  openable:
+    open: false
+  lockable:
+    locked: true
+    keys:
+      - brass_key
+```
+
+The lock owns the authoritative compatibility relation rather than duplicating it on both lock and key.
+
+An item does not enumerate every possible affordance. A chair does not require explicit `throwable`, `breakable`, `improvised_weapon`, or `firewood` components merely because Keeper might plausibly use it in those ways.
+
+**Principle:** a recurring mechanic deserves a component. A one-off possibility can remain semantic until proven otherwise.
+
+Fungible items may eventually support quantity and stack operations. Unique items simply have quantity one.
+
+Destroying an Item should end its presence in the current world without erasing its stable historical identity or past events.
+
+### Creature
+
+A Creature represents a persistent actor or living/actor-like entity. Its core need not include a complete character sheet:
+
+```yaml
+id: elin
+type: creature
+name: Elin
+contained_by: greenford_inn
+description: A healer living in Greenford.
+```
+
+Health, stats, conditions, equipment, and similar mechanics should be optional components materialized when the game requires them. An innkeeper does not need combat statistics merely because the player could theoretically attack them.
+
+The Game definition determines which mechanical components are expected and what they mean.
+
+Equipment is separate mechanical state layered over containment. An equipped item must normally remain within the Creature's possession tree, but inventory itself is derived from containment rather than duplicated.
+
+Life/death state should not be inferred blindly from health. Reaching zero health may mean death, unconsciousness, incapacitation, transformation, or something else according to the Game definition. If Realm stores an authoritative life state, the rules or Keeper decide when that state changes.
+
+Knowledge does not belong inside the Creature as ordinary descriptive state. It is a relationship between an actor and world facts, allowing objective truth and actor belief to differ.
+
+**Principle:** entities should not require mechanical state merely because they might someday participate in a mechanic. Required mechanics can be materialized when the entity enters that domain.
+
+### Faction
+
+A Faction is primarily a persistent group identity:
+
+```yaml
+id: blackmere_cult
+type: faction
+name: The Blackmere Cult
+description: A secretive group operating around Blackmere.
+```
+
+Membership should be represented as a relationship rather than duplicated member lists:
+
+```text
+Varek ── member_of ──► Blackmere Cult
+```
+
+Metadata such as role, rank, or membership secrecy can be added if gameplay demonstrates a need.
+
+Faction relationships such as hostility, cooperation, leadership, influence, or reputation may initially remain semantic canon. They should become structured mechanics only when Realm needs to enforce or query them reliably.
+
+Goals and ongoing activities should not automatically be fields on Faction. A Faction can participate in multiple independent Situations.
+
+### Situation
+
+A Situation represents an unresolved or developing circumstance in the world whose future state may matter.
+
+For example:
+
+```yaml
+id: cult_excavation
+type: situation
+name: The excavation beneath Blackmere
+state: active
+participants:
+  - blackmere_cult
+description: The Blackmere Cult is attempting to reach the sealed crypt.
+```
+
+A Situation may have optional structured state such as a stage, but should not require artificial numerical progress. Some developments naturally support progress measures; many do not.
+
+A pressure or agenda can be treated as part of a Situation rather than requiring a separate fundamental entity kind:
+
+```yaml
+pressure:
+  intent: Reach the sealed crypt.
+  tendency: >
+    Unless interfered with, the cult continues excavating and will
+    eventually find an entrance.
+```
+
+Realm does not need to simulate such pressure continuously. When fictional time advances, Realm can surface relevant active Situations to Keeper. Keeper decides what has plausibly developed and commits the resulting state/canon changes.
+
+A Situation should have a small lifecycle such as active/resolved/abandoned, while its detailed meaning can remain semantic.
+
+This differs from a scheduled development. A schedule has a trigger Realm can evaluate deterministically; a Situation requires interpretation. A fuzzy Situation may later produce a precise schedule, for example when an ongoing cult excavation develops into a ritual planned for a known time.
+
+Situations also avoid requiring a fundamental `Quest` entity. Player-facing quests or journal entries can be derived from situations, facts, and player knowledge without making the world organize itself around the player's objectives.
+
+## 5. Current state and canon
 
 Realm distinguishes mechanical/current state from semantic world truth.
 
@@ -111,7 +301,7 @@ Something beneath Blackmere fears sunlight.
 
 Canon should not be forced into numerical or highly structured properties merely because it could be. Semantic facts may remain relatively free-form while still becoming authoritative once established.
 
-## 4. Hidden canon and knowledge
+## 5. Hidden canon and knowledge
 
 Objective world truth and actor knowledge are different things.
 
@@ -136,7 +326,7 @@ The game master is a trusted DM and may receive hidden canon. Future NPC agents 
 
 Knowledge is therefore not merely a presentation concern; it may become part of authoritative world state.
 
-## 5. Lazy materialization
+## 6. Lazy materialization
 
 Realm does not require the entire world to be defined before play.
 
@@ -170,7 +360,7 @@ understood / connected to other facts
 
 Once materialized, later improvisation must respect the established fact.
 
-## 6. World time
+## 7. World time
 
 Realm owns an authoritative world clock.
 
@@ -190,7 +380,7 @@ Minute-perfect simulation is not the goal. Causal consistency is.
 
 Advancing time may cause scheduled developments or active situations to become relevant.
 
-## 7. Scheduled developments and pressures
+## 8. Scheduled developments and pressures
 
 Two different concepts are useful.
 
@@ -224,7 +414,7 @@ When sufficient time passes, the game master or a future world-simulation compon
 
 This supports dramaturgical pressure without railroading: ignored situations continue to develop rather than forcing the player toward prepared content.
 
-## 8. Operations
+## 9. Operations
 
 The initial operation vocabulary should remain deliberately small. Candidate primitives include:
 
@@ -272,7 +462,7 @@ may be interpreted by the game master into a check followed by operations such a
 
 The exact operation set should emerge from worked gameplay cases rather than attempting to enumerate every possible interaction in advance.
 
-## 9. Events and history
+## 10. Events and history
 
 Successful state transitions should produce durable historical events.
 
@@ -311,7 +501,7 @@ durable history
 
 This allows Realm to preserve both the current world and the sequence of changes that produced it.
 
-## 10. World patches and materialization
+## 11. World patches and materialization
 
 Gameplay operations are small and precise. World construction can require many related changes at once.
 
@@ -343,7 +533,7 @@ Initially Keeper may produce such patches itself. A future specialized World Bui
 
 A scenario/world seed can likewise be treated conceptually as the initial large world patch at time zero.
 
-## 11. Game definition and evolving rules
+## 12. Game definition and evolving rules
 
 Realm should separate authoritative world state from the game's rules and conventions.
 
@@ -439,7 +629,7 @@ Likewise, a condition such as `bleeding` may initially be an authoritative persi
 
 This allows Realm to provide deterministic bookkeeping without prematurely becoming a complete RPG rules engine.
 
-## 12. Game phases
+## 13. Game phases
 
 Not all play requires the same degree of mechanical rigidity.
 
@@ -466,7 +656,7 @@ The game master remains responsible for interpretation and narration while Realm
 
 Other specialized phases may emerge later, but they should be introduced only when gameplay demonstrates a need.
 
-## 13. What Realm deliberately does not model
+## 14. What Realm deliberately does not model
 
 Realm should not become a complete simulation of reality.
 
@@ -483,7 +673,7 @@ Structure is justified when Realm needs to:
 - drive future causal developments, or
 - expose reliable state to multiple clients or agents.
 
-## 14. Worked cases
+## 15. Worked cases
 
 ### Locked door
 
