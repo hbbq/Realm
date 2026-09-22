@@ -343,7 +343,103 @@ Initially Keeper may produce such patches itself. A future specialized World Bui
 
 A scenario/world seed can likewise be treated conceptually as the initial large world patch at time zero.
 
-## 11. Game phases
+## 11. Game definition and evolving rules
+
+Realm should separate authoritative world state from the game's rules and conventions.
+
+A useful conceptual layering is:
+
+```text
+Realm engine
+  └─ generic resolution/state primitives
+     roll, check, damage, heal, conditions, time...
+
+Game definition
+  ├─ style / premise
+  ├─ rules and guidelines
+  ├─ world seed
+  └─ initial player state
+
+Game state
+  └─ the concrete evolving world
+```
+
+The game definition does not need to be a complete formal ruleset. It may contain broad guidance such as:
+
+```text
+Low-fantasy.
+Combat is dangerous.
+Healing is slow.
+Ordinary weapons have fairly stable effectiveness.
+```
+
+Keeper may make rulings within those guidelines. Realm records and enforces the resulting state changes.
+
+### Exact state, resolution primitives, and game rules
+
+Three layers should remain conceptually distinct:
+
+1. **Exact state** — for example, Elin has 3/10 health and is bleeding.
+2. **Resolution primitives** — dice rolls, checks, damage, healing, conditions, and other exact transitions.
+3. **Game rules** — for example, how dangerous a fall is, what a sword normally does, or what happens at zero health.
+
+Realm must own exact state and should provide deterministic resolution primitives. The amount of the game rules that Realm itself enforces can grow only where consistency requires it.
+
+For example, Keeper might rule before a roll:
+
+```text
+This fall requires a Dexterity check against difficulty 13.
+Failure: 1d6+2 damage and bleeding.
+Success: 1d6 damage.
+```
+
+Realm can then perform the exact check, rolls, and resulting state transitions without needing a universal built-in falling rule.
+
+### Rules can crystallize through play
+
+A mechanic does not need to be formalized before it is first encountered.
+
+A useful progression is:
+
+```text
+unspecified mechanic
+        ↓
+Keeper makes a ruling
+        ↓
+one-off consequence
+        │
+        └── if recurring or identity-defining
+                    ↓
+             established mechanic
+                    ↓
+          reused by future rulings
+```
+
+For example, the first time an iron sword matters, Keeper may establish that ordinary iron swords deal `1d8` slashing damage. If this should remain consistent, that mechanic can be persisted in the game definition or an appropriate entity/archetype definition.
+
+The exact damage for each successful hit can still be resolved by Realm through a roll.
+
+This is lazy materialization applied to rules: the game can begin with a small number of broad conventions and gradually acquire more precise mechanics as play demonstrates that they matter.
+
+**Principle:** recurring mechanics deserve persistent rules; one-off rulings do not automatically require new engine mechanics.
+
+### State does not imply a complete ruleset
+
+Health, conditions, and similar state may be authoritative without Realm deciding all consequences automatically.
+
+For example:
+
+```text
+health: 3 -> 0
+```
+
+does not inherently have to mean death. Depending on the game definition, Keeper may subsequently establish unconsciousness, death, incapacitation, transformation, or another consequence.
+
+Likewise, a condition such as `bleeding` may initially be an authoritative persistent condition whose narrative/mechanical meaning is interpreted by Keeper. If it repeatedly has the same mechanical effect, that effect can later become an established rule.
+
+This allows Realm to provide deterministic bookkeeping without prematurely becoming a complete RPG rules engine.
+
+## 12. Game phases
 
 Not all play requires the same degree of mechanical rigidity.
 
@@ -370,7 +466,7 @@ The game master remains responsible for interpretation and narration while Realm
 
 Other specialized phases may emerge later, but they should be introduced only when gameplay demonstrates a need.
 
-## 12. What Realm deliberately does not model
+## 13. What Realm deliberately does not model
 
 Realm should not become a complete simulation of reality.
 
@@ -387,7 +483,7 @@ Structure is justified when Realm needs to:
 - drive future causal developments, or
 - expose reliable state to multiple clients or agents.
 
-## 13. Worked cases
+## 14. Worked cases
 
 ### Locked door
 
