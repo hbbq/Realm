@@ -301,30 +301,115 @@ Something beneath Blackmere fears sunlight.
 
 Canon should not be forced into numerical or highly structured properties merely because it could be. Semantic facts may remain relatively free-form while still becoming authoritative once established.
 
-## 5. Hidden canon and knowledge
+## 5. Relations, facts, knowledge, and beliefs
 
-Objective world truth and actor knowledge are different things.
+Realm should not model every meaningful statement as a generic graph relation. Structure is justified where Realm needs to understand semantics, enforce invariants, or perform reliable queries and operations.
 
-A fact may be true without being known by the player:
+### Structured relations
+
+A small set of relationships deserve first-class structure because Realm needs to reason about them. Initial examples include:
 
 ```text
-WORLD TRUTH
-  Varek leads the cult.
-  Elin saw Varek near the mill.
-
-PLAYER KNOWLEDGE
-  Varek appears to be a local noble.
-  Elin becomes nervous when the mill is mentioned.
+contained_by(entity, container)
+connected(place, place)
+member_of(creature, faction)
 ```
 
-Realm should eventually be able to answer both:
+Containment has invariants such as a single immediate physical parent and no cycles. Connections participate in traversal. Membership may be queried reliably without requiring Keeper to interpret prose.
 
-- What is true?
-- What does this actor know?
+Other relationships such as love, fear, debt, suspicion, family history, employment, or responsibility for an old event should normally begin as semantic canon unless gameplay demonstrates a need for Realm to understand them structurally.
 
-The game master is a trusted DM and may receive hidden canon. Future NPC agents should receive only knowledge appropriate to that actor.
+**Principle:** a relation becomes structured when Realm needs to reason about or enforce its semantics. Otherwise, established meaning belongs in canon.
 
-Knowledge is therefore not merely a presentation concern; it may become part of authoritative world state.
+### Facts and canon
+
+A Fact represents established semantic truth that is not already better represented by structured current state.
+
+A useful initial form is deliberately hybrid:
+
+```yaml
+id: fact_42
+text: Varek murdered the merchant.
+subjects:
+  - varek
+  - merchant_aldren
+tags:
+  - murder
+  - blackmere_mystery
+```
+
+The semantic proposition is authoritative. Optional entity references and tags improve retrieval and linking without requiring Realm to understand a complete subject/predicate/object ontology.
+
+Realm should not duplicate structured state as facts. If a door entity already has:
+
+```text
+lockable.locked = true
+```
+
+Realm should not also need an authoritative Fact saying "the door is locked." That would create two competing representations of the same current state.
+
+Historical or semantic truths remain appropriate facts:
+
+```text
+Varek locked the crypt door before leaving.
+Varek murdered Aldren.
+The crypt predates the castle.
+Elin fears the king.
+```
+
+The first remains historically true even if the door is later unlocked.
+
+This gives a useful distinction:
+
+```text
+CURRENT STATE
+  How the world is now.
+  → entities, components, structured relations
+
+HISTORICAL / SEMANTIC CANON
+  What happened or what is established as true.
+  → events and facts
+```
+
+### Knowledge
+
+Knowledge links an actor to established canon:
+
+```text
+knows(elin, fact_42)
+knows(varek, fact_42)
+```
+
+Absence of a knowledge relation does not need to mean explicit ignorance; it simply means Realm has not established that the actor knows the Fact.
+
+An operation such as `reveal_fact(fact, actor)` can establish knowledge and produce a durable event.
+
+Secrecy is therefore not fundamentally a property of a Fact. The same truth may be known by many cultists, unknown to the player, and known only partially by another actor. What is secret emerges from the distribution of knowledge.
+
+Realm should not maintain a complete per-actor replica of mutable world state. For example, if Elin last saw a door while it was locked and it was later opened off-screen, v1 does not need an automatic epistemic snapshot saying that Elin still believes `door.locked = true`.
+
+Keeper can reason naturally from the circumstances. If a particular misunderstanding becomes narratively important, it can be persisted explicitly as a belief.
+
+**Principle:** Realm tracks authoritative current state globally. Actor knowledge is persisted selectively for semantically important information, not as per-actor replicas of mutable world state.
+
+### Beliefs
+
+Belief is distinct from knowledge because an actor may hold a proposition that is false:
+
+```yaml
+holder: toren
+text: Bandits murdered the merchant.
+```
+
+The canonical Fact may instead be:
+
+```text
+Varek murdered the merchant.
+```
+
+Beliefs should initially remain actor-scoped semantic propositions. Realm does not need a detailed psychological ontology of suspicion, doubt, confidence, denial, memory quality, or cognitive dissonance.
+
+If such distinctions later become important to gameplay, they can be materialized then.
 
 ## 6. Lazy materialization
 
