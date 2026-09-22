@@ -778,7 +778,46 @@ The game master remains responsible for interpretation and narration while Realm
 
 Other specialized phases may emerge later, but they should be introduced only when gameplay demonstrates a need.
 
-## 14. What Realm deliberately does not model
+## 14. Keeper continuity, revisions, and future forks
+
+Keeper should not be the authoritative owner of gameplay state. State required to resume play correctly belongs in Realm, including transient but mechanically significant state such as an active combat, round, turn order, current turn, participants, health, conditions, and other established phase state.
+
+A Keeper session should therefore be replaceable. After a restart, session rollover, or model change, a new Keeper should be able to recover the authoritative gameplay position from Realm. Any Keeper-specific summary or retained narrative context is supplementary and non-authoritative.
+
+This also creates a useful requirement for history. Realm does not need arbitrary rollback, branching timelines, or full event sourcing in the first version, but authoritative changes should belong to identifiable revisions or checkpoints rather than existing only as destructive mutation with no recoverable boundary.
+
+Conceptually:
+
+```text
+Game
+  revision 1
+      ↓
+  revision 2
+      ↓
+  revision 3
+      ↓
+  current revision
+```
+
+Durable events remain associated with the authoritative changes that produced them. The exact persistence strategy is an implementation question; the state model does not require current state to be reconstructed from the complete event history on every load.
+
+A future fork should preferably preserve the original history rather than rewinding it destructively:
+
+```text
+                    ●──●──●  original game
+                   /
+────●──●──●──●──●
+                   \
+                    ●──●     fork
+```
+
+This can first be useful as a development and testing facility: a game can be reproduced or copied from a checkpoint before a combat or other interaction and exercised again after Keeper, rules, or Realm implementation changes. The same underlying capability could later support player-facing alternate histories, but that is not a v1 requirement.
+
+**Principle:** Keeper state should be Realm state wherever continuity or correctness depends on it. Authoritative changes should have durable historical identity, even when v1 only exposes the current state.
+
+**Principle:** prefer non-destructive forks from an earlier revision over destructive rollback. Full replay, arbitrary branching, timeline merging, and backwards-running world time remain future concerns.
+
+## 15. What Realm deliberately does not model
 
 Realm should not become a complete simulation of reality.
 
@@ -795,7 +834,7 @@ Structure is justified when Realm needs to:
 - drive future causal developments, or
 - expose reliable state to multiple clients or agents.
 
-## 15. Worked cases
+## 16. Worked cases
 
 ### Locked door
 
