@@ -26,6 +26,8 @@ export class RealmService {
     return this.mutate(gameId, "world_patch", patch, (revision) => {
       const existingEntities = this.db.prepare("SELECT * FROM entities WHERE game_id = ?").all(gameId) as Row[];
       const entityMap = new Map(existingEntities.map((row) => [row.id as string, row]));
+      const connectionIds = new Set<string>((this.db.prepare("SELECT id FROM connections WHERE game_id = ?").all(gameId) as Row[]).map((r) => r.id));
+      const factIds = new Set<string>((this.db.prepare("SELECT id FROM facts WHERE game_id = ?").all(gameId) as Row[]).map((r) => r.id));
       const aliases = new Map<string, string>();
       const creates = patch.entities ?? [];
       const updates = patch.entity_updates ?? [];
@@ -43,11 +45,26 @@ export class RealmService {
         const id = entity.id ?? newId();
         entity.id = id;
         requireValue(!entityMap.has(id), "DUPLICATE_ENTITY", `entity already exists: ${id}`);
-        if (entity.ref) {
-          requireValue(!aliases.has(entity.ref), "DUPLICATE_REF", `duplicate local ref: ${entity.ref}`);
-          aliases.set(entity.ref, id);
-        }
         entityMap.set(id, { ...entity, id });
+      }
+      for (const connection of connections) {
+        const id = connection.id ?? newId();
+        connection.id = id;
+        requireValue(!connectionIds.has(id), "DUPLICATE_CONNECTION", `connection already exists: ${id}`);
+        connectionIds.add(id);
+      }
+      for (const fact of facts) {
+        const id = fact.id ?? newId();
+        fact.id = id;
+        requireValue(!factIds.has(id), "DUPLICATE_FACT", `fact already exists: ${id}`);
+        factIds.add(id);
+      }
+      const addressableIds = new Set<string>([...entityMap.keys(), ...connectionIds, ...factIds]);
+      for (const item of [...creates, ...connections, ...facts]) {
+        if (!item.ref) continue;
+        requireValue(!addressableIds.has(item.ref), "REF_ID_COLLISION", `local ref collides with an addressable ID: ${item.ref}`);
+        requireValue(!aliases.has(item.ref), "DUPLICATE_REF", `duplicate local ref: ${item.ref}`);
+        aliases.set(item.ref, item.id!);
       }
       const resolve = (value: string): string => aliases.get(value) ?? value;
       for (const update of updates) requireValue(entityMap.has(resolve(update.entity_id)), "ENTITY_NOT_FOUND", `entity not found: ${update.entity_id}`, 404);
@@ -75,35 +92,17 @@ export class RealmService {
         }
       }
 
-      const connectionIds = new Set((this.db.prepare("SELECT id FROM connections WHERE game_id = ?").all(gameId) as Row[]).map((r) => r.id));
       for (const connection of connections) {
-        const id = connection.id ?? newId();
-        if (connection.ref) {
-          requireValue(!aliases.has(connection.ref), "DUPLICATE_REF", `duplicate local ref: ${connection.ref}`);
-          aliases.set(connection.ref, id);
-        }
-        requireValue(!connectionIds.has(id), "DUPLICATE_CONNECTION", `connection already exists: ${id}`);
-        connection.id = id;
         const from = entityMap.get(resolve(connection.from_place_id));
         const to = entityMap.get(resolve(connection.to_place_id));
         requireValue(from?.kind === "place" && to?.kind === "place", "INVALID_CONNECTION", "connection endpoints must be places");
         requireValue(resolve(connection.from_place_id) !== resolve(connection.to_place_id), "INVALID_CONNECTION", "connection endpoints must differ");
         requireValue(connection.typical_travel_minutes === undefined || (Number.isSafeInteger(connection.typical_travel_minutes) && connection.typical_travel_minutes >= 0), "INVALID_CONNECTION", "typical_travel_minutes must be a non-negative integer");
-        connectionIds.add(id);
       }
 
-      const factIds = new Set((this.db.prepare("SELECT id FROM facts WHERE game_id = ?").all(gameId) as Row[]).map((r) => r.id));
       for (const fact of facts) {
         requireValue(fact.text?.trim(), "INVALID_FACT", "fact text is required");
-        const id = fact.id ?? newId();
-        if (fact.ref) {
-          requireValue(!aliases.has(fact.ref), "DUPLICATE_REF", `duplicate local ref: ${fact.ref}`);
-          aliases.set(fact.ref, id);
-        }
-        requireValue(!factIds.has(id), "DUPLICATE_FACT", `fact already exists: ${id}`);
-        fact.id = id;
         if (fact.subject_entity_id) requireValue(entityMap.has(resolve(fact.subject_entity_id)), "ENTITY_NOT_FOUND", `fact subject not found: ${fact.subject_entity_id}`);
-        factIds.add(id);
       }
       for (const item of knowledge) {
         const actor = entityMap.get(resolve(item.actor_id));
@@ -147,13 +146,13 @@ export class RealmService {
       }
       for (const item of knowledge) {
         const actor = resolve(item.actor_id), fact = resolve(item.fact_id);
-        this.db.prepare("INSERT OR IGNORE INTO fact_knowledge(game_id,actor_entity_id,fact_id,learned_revision) VALUES (?,?,?,?)").run(gameId, actor, fact, revision);
-        events.push({ type: "FactRevealed", payload: { actor_id: actor, fact_id: fact } });
+        const result = this.db.prepare("INSERT OR IGNORE INTO fact_knowledge(game_id,actor_entity_id,fact_id,learned_revision) VALUES (?,?,?,?)").run(gameId, actor, fact, revision);
+        if (result.changes > 0) events.push({ type: "FactRevealed", payload: { actor_id: actor, fact_id: fact } });
       }
       for (const item of observations) {
         const actor = resolve(item.actor_id), entity = resolve(item.entity_id);
-        this.db.prepare("INSERT OR IGNORE INTO entity_observations(game_id,actor_entity_id,entity_id,observed_revision) VALUES (?,?,?,?)").run(gameId, actor, entity, revision);
-        events.push({ type: "EntityObserved", payload: { actor_id: actor, entity_id: entity } });
+        const result = this.db.prepare("INSERT OR IGNORE INTO entity_observations(game_id,actor_entity_id,entity_id,observed_revision) VALUES (?,?,?,?)").run(gameId, actor, entity, revision);
+        if (result.changes > 0) events.push({ type: "EntityObserved", payload: { actor_id: actor, entity_id: entity } });
       }
       return events;
     });
@@ -182,8 +181,8 @@ export class RealmService {
       requireValue(actor?.kind === "creature", "INVALID_ACTOR", "actor must be a creature", 400);
       const fact = this.db.prepare("SELECT 1 FROM facts WHERE game_id=? AND id=?").get(gameId, input.fact_id);
       requireValue(fact, "FACT_NOT_FOUND", `fact not found: ${input.fact_id}`, 404);
-      this.db.prepare("INSERT OR IGNORE INTO fact_knowledge(game_id,actor_entity_id,fact_id,learned_revision) VALUES (?,?,?,?)").run(gameId, input.actor_id, input.fact_id, revision);
-      return [{ type: "FactRevealed", payload: { actor_id: input.actor_id, fact_id: input.fact_id } }];
+      const result = this.db.prepare("INSERT OR IGNORE INTO fact_knowledge(game_id,actor_entity_id,fact_id,learned_revision) VALUES (?,?,?,?)").run(gameId, input.actor_id, input.fact_id, revision);
+      return result.changes > 0 ? [{ type: "FactRevealed", payload: { actor_id: input.actor_id, fact_id: input.fact_id } }] : [];
     });
   }
 
@@ -204,9 +203,9 @@ export class RealmService {
       const actor = this.entity(gameId, input.actor_id);
       requireValue(actor?.kind === "creature", "INVALID_ACTOR", "actor must be a creature", 400);
       requireValue(this.entity(gameId, input.entity_id), "ENTITY_NOT_FOUND", `entity not found: ${input.entity_id}`, 404);
-      this.db.prepare("INSERT OR IGNORE INTO entity_observations(game_id,actor_entity_id,entity_id,observed_revision) VALUES (?,?,?,?)")
+      const result = this.db.prepare("INSERT OR IGNORE INTO entity_observations(game_id,actor_entity_id,entity_id,observed_revision) VALUES (?,?,?,?)")
         .run(gameId, input.actor_id, input.entity_id, revision);
-      return [{ type: "EntityObserved", payload: { actor_id: input.actor_id, entity_id: input.entity_id } }];
+      return result.changes > 0 ? [{ type: "EntityObserved", payload: { actor_id: input.actor_id, entity_id: input.entity_id } }] : [];
     });
   }
 
@@ -241,7 +240,7 @@ export class RealmService {
       (SELECT 1 FROM entity_observations o WHERE o.game_id=e.game_id AND o.actor_entity_id=? AND o.entity_id=e.id)) ORDER BY e.id`).all(gameId, actorId, actorId) as Row[];
     const visible = new Set(rows.map((row) => row.id as string));
     return {
-      game: { id: game.id, title: game.title, world_time_minutes: game.world_time_minutes, current_revision: game.current_revision },
+      game: { id: game.id, title: game.title, world_time_minutes: game.world_time_minutes },
       actor_id: actorId,
       entities: rows.map((row) => this.mapPlayerEntity(row, actorId)),
       containment: (this.db.prepare("SELECT child_entity_id,parent_entity_id FROM containment WHERE game_id=?").all(gameId) as Row[])
@@ -279,7 +278,10 @@ export class RealmService {
       const revision = game.current_revision + 1;
       const revisionId = newId(), now = new Date().toISOString();
       const events = change(revision);
-      requireValue(events.length > 0, "EMPTY_MUTATION", "mutation produced no events");
+      if (events.length === 0) {
+        const current = this.db.prepare("SELECT id FROM revisions WHERE game_id=? AND revision_number=?").get(gameId, game.current_revision) as Row;
+        return { revision: game.current_revision, revision_id: current.id, events: [], idempotent: false };
+      }
       this.db.prepare("INSERT INTO revisions(game_id,revision_number,id,mutation_kind,idempotency_key,created_at,metadata_json) VALUES (?,?,?,?,?,?,?)")
         .run(gameId, revision, revisionId, kind, request.idempotency_key, now, "{}");
       const insertEvent = this.db.prepare("INSERT INTO events(game_id,revision_number,ordinal,type,payload_json,created_at) VALUES (?,?,?,?,?,?)");

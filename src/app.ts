@@ -38,7 +38,7 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) return reply.status(error.statusCode).send({ error: error.code, message: error.message });
-    if (error.validation) return reply.status(400).send({ error: "INVALID_REQUEST", message: error.message });
+    if (error instanceof Error && "validation" in error && error.validation) return reply.status(400).send({ error: "INVALID_REQUEST", message: error.message });
     app.log.error(error);
     return reply.status(500).send({ error: "INTERNAL_ERROR", message: "internal server error" });
   });
@@ -61,6 +61,6 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
   app.get("/games/:gameId/state", { schema: { params: GameParams, querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } }, async (r) => realm.playerState(r.params.gameId, r.query.actor_id));
   app.get("/games/:gameId/authoritative-state", { schema: { params: GameParams } }, async (r) => realm.authoritativeState(r.params.gameId));
   app.get("/games/:gameId/revisions", { schema: { params: GameParams } }, async (r) => realm.revisions(r.params.gameId));
-  app.get("/games/:gameId/revisions/:revision/events", { schema: { params: Type.Object({ gameId: Id, revision: Type.Integer({ minimum: 1 })) } } }, async (r) => realm.events(r.params.gameId, r.params.revision));
+  app.get("/games/:gameId/revisions/:revision/events", { schema: { params: Type.Object({ gameId: Id, revision: Type.Integer({ minimum: 1 }) }) } }, async (r) => realm.events(r.params.gameId, r.params.revision));
   return app;
 }

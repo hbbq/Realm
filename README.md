@@ -46,6 +46,7 @@ The actor-scoped route is a purpose-built projection:
 - Containment appears only when both ends are visible.
 - Connections require an explicit player-visible flag and visible endpoints.
 - Learning a fact does not automatically expose its subject entity.
+- The player projection omits the authoritative revision so hidden mutations cannot be inferred from revision changes.
 - Revisions, events, game definitions, and the authoritative-state route are trusted surfaces and must not be presented directly to players.
 
 This is deliberately smaller than a general ACL or per-field visibility system.

@@ -150,3 +150,102 @@ test("invalid patches and revision conflicts are atomic and game scoped", async 
   assert.equal(conflict.statusCode, 409);
   assert.equal(conflict.json().error, "REVISION_CONFLICT");
 });
+
+test("player state does not expose revisions from hidden world changes", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "visible-seed",
+    entities: [{ id: "hero", kind: "creature", name: "Hero" }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+  const before = (await app.inject({ method: "GET", url: `/games/${gameId}/state?actor_id=hero` })).json();
+  assert.equal("current_revision" in before.game, false);
+
+  const hidden = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 1, idempotency_key: "hidden-change",
+    entities: [{ id: "secret", kind: "item", name: "Secret" }]
+  }});
+  assert.equal(hidden.statusCode, 201, hidden.body);
+  const after = (await app.inject({ method: "GET", url: `/games/${gameId}/state?actor_id=hero` })).json();
+  assert.deepEqual(after, before);
+  assert.equal((await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json().game.current_revision, 2);
+});
+
+test("WorldPatch rejects refs that collide with addressable IDs", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "collision-seed",
+    entities: [{ id: "existing-place", kind: "place", name: "Existing" }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+
+  const collision = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 1, idempotency_key: "ambiguous-ref",
+    entities: [
+      { ref: "existing-place", kind: "place", name: "Other" },
+      { id: "child", kind: "item", name: "Child" }
+    ],
+    containment: [{ child_id: "child", parent_id: "existing-place" }]
+  }});
+  assert.equal(collision.statusCode, 400, collision.body);
+  assert.equal(collision.json().error, "REF_ID_COLLISION");
+
+  const newIdCollision = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 1, idempotency_key: "new-id-ambiguous-ref",
+    entities: [
+      { id: "new-place", kind: "place", name: "New" },
+      { ref: "new-place", kind: "place", name: "Other" }
+    ]
+  }});
+  assert.equal(newIdCollision.statusCode, 400, newIdCollision.body);
+  assert.equal(newIdCollision.json().error, "REF_ID_COLLISION");
+
+  const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.deepEqual(state.entities.map((entity: any) => entity.id), ["existing-place"]);
+  assert.equal(state.game.current_revision, 1);
+});
+
+test("repeated knowledge and observation writes emit only real transitions", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "transition-seed",
+    entities: [
+      { id: "actor", kind: "creature", name: "Actor" },
+      { id: "clue", kind: "item", name: "Clue" }
+    ],
+    facts: [{ id: "fact", text: "A useful fact." }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+
+  const transitions = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 1, idempotency_key: "duplicate-transitions",
+    knowledge: [{ actor_id: "actor", fact_id: "fact" }, { actor_id: "actor", fact_id: "fact" }],
+    observations: [{ actor_id: "actor", entity_id: "clue" }, { actor_id: "actor", entity_id: "clue" }]
+  }});
+  assert.equal(transitions.statusCode, 201, transitions.body);
+  assert.deepEqual(transitions.json().events.map((event: any) => event.type), ["FactRevealed", "EntityObserved"]);
+
+  const repeatedReveal = await app.inject({ method: "POST", url: `/games/${gameId}/operations/reveal-fact`, payload: {
+    expected_revision: 2, idempotency_key: "repeat-reveal", actor_id: "actor", fact_id: "fact"
+  }});
+  assert.equal(repeatedReveal.statusCode, 200, repeatedReveal.body);
+  assert.equal(repeatedReveal.json().revision, 2);
+  assert.deepEqual(repeatedReveal.json().events, []);
+
+  const repeatedObservation = await app.inject({ method: "POST", url: `/games/${gameId}/operations/observe-entity`, payload: {
+    expected_revision: 2, idempotency_key: "repeat-observation", actor_id: "actor", entity_id: "clue"
+  }});
+  assert.equal(repeatedObservation.statusCode, 200, repeatedObservation.body);
+  assert.equal(repeatedObservation.json().revision, 2);
+  assert.deepEqual(repeatedObservation.json().events, []);
+
+  const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.game.current_revision, 2);
+  assert.equal(state.knowledge.length, 1);
+  assert.equal(state.observations.length, 1);
+  const revisions = (await app.inject({ method: "GET", url: `/games/${gameId}/revisions` })).json();
+  assert.deepEqual(revisions.map((revision: any) => revision.revision_number), [1, 2]);
+});
