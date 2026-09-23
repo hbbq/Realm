@@ -25,6 +25,30 @@ async function createGame(app: FastifyInstance, title = "Greyfen") {
   return response.json().id as string;
 }
 
+test("companion lists games and serves its same-origin inspector", async () => {
+  const { app } = harness();
+  const empty = await app.inject({ method: "GET", url: "/games" });
+  assert.equal(empty.statusCode, 200);
+  assert.deepEqual(empty.json(), []);
+
+  const first = await createGame(app, "Greyfen");
+  const second = await createGame(app, "Other");
+  const games = await app.inject({ method: "GET", url: "/games" });
+  assert.equal(games.statusCode, 200);
+  assert.deepEqual(games.json().map((game: any) => game.id), [first, second]);
+  assert.deepEqual(games.json().map((game: any) => game.title), ["Greyfen", "Other"]);
+  assert.equal(games.json()[0].current_revision, 0);
+  assert.equal("definition" in games.json()[0], false);
+
+  const page = await app.inject({ method: "GET", url: "/companion" });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.headers["content-type"] || "", /text\/html/);
+  assert.match(page.body, /Realm Web Companion/);
+  assert.match(page.body, /\/authoritative-state/);
+  assert.match(page.body, /actor_id=/);
+  assert.match(page.body, /\/revisions/);
+});
+
 test("Greyfen scenario exercises the complete API slice without leaking hidden canon", async () => {
   const { app } = harness();
   const gameId = await createGame(app);
