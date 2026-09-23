@@ -1,0 +1,23 @@
+{
+  "name": "realm-v1",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Minimal authoritative Realm service",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test dist/test/greyfen.test.js"
+  },
+  "dependencies": {
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@sinclair/typebox": "^0.34.41",
+    "better-sqlite3": "^12.2.0",
+    "fastify": "^5.6.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.18.6",
+    "typescript": "^5.9.2"
+  }
+}
