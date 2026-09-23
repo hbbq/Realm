@@ -1,0 +1,280 @@
+# Greyfen Adventure Package vision example
+#
+# This file is intentionally aspirational. It is a design reference, not a
+# schema that Realm currently promises to load. Sections marked "future" show
+# concepts we want the package format to be able to express eventually.
+#
+# The same package model should support both emergent adventures and more
+# tightly prepared/adapted material.
+
+format: realm-adventure
+version: 0
+
+adventure:
+  id: bell-at-greyfen
+  title: The Bell at Greyfen
+  description: >
+    A low-fantasy mystery around a stolen abbey seal. The initial situation is
+    prepared, but the story is expected to emerge from play.
+  mode: emergent
+
+setting:
+  tone:
+    - low fantasy
+    - grounded
+    - mysterious
+  guidance: |
+    Greyfen is a small, isolated settlement where the supernatural is possible
+    but unusual. Keep additions consistent with established Realm state.
+  constraints:
+    - "Do not introduce common high-fantasy conveniences without a reason."
+    - "Established Realm facts always take precedence over prepared material."
+
+keeper:
+  # Guidance for how freely the GM may grow this particular world.
+  creative_freedom: high
+  guidance: |
+    Grow the world when play requires it. Prefer established people and places
+    when appropriate. Prepared material is available to use when it fits, but
+    not every prepared element must appear.
+
+    You may invent new people, places, objects, facts and complications when
+    useful. Once a material consequence has been decided, persist it in Realm
+    before treating it as established truth.
+
+    Estimate soft consequences such as how long an unmodelled action takes.
+    Realm owns the resulting authoritative time and state.
+
+player:
+  actor:
+    id: elin
+    kind: creature
+    name: Elin
+    description: The player character.
+    player_visible: true
+  starts_at: square
+
+# Initial authoritative truth. This is the part of the package that should
+# eventually be materialized into Realm when a new game is created.
+initial_state:
+  world:
+    # Future time semantics: the package can express a meaningful local clock.
+    # Realm currently stores elapsed world_time_minutes.
+    time:
+      local_time: "14:00"
+      day: 1
+
+  places:
+    - id: square
+      name: Greyfen Square
+      description: An old execution site at the centre of Greyfen.
+      player:
+        name: Greyfen Square
+        description: A rain-dark village square.
+      player_visible: true
+
+    - id: cellar
+      name: Inn Cellar
+      description: A cramped stone cellar beneath the inn.
+      player:
+        name: Cellar
+        description: A cramped stone cellar.
+      player_visible: false
+
+    - id: abbey
+      name: Greyfen Abbey
+      description: A weathered stone abbey on the hill beyond the village.
+      player:
+        name: Greyfen Abbey
+        description: A weathered stone abbey on the hill.
+      player_visible: false
+
+  characters:
+    - id: mara
+      name: Mara
+      description: >
+        The innkeeper. She knows more about recent events than she initially
+        admits.
+      player:
+        name: Mara
+        description: The innkeeper.
+      player_visible: true
+      location: square
+
+    - id: varek
+      name: Varek
+      description: A thief hiding beneath the inn.
+      player:
+        name: Varek
+        description: A wary stranger.
+      player_visible: false
+      location: cellar
+
+  items:
+    - id: abbey-seal
+      name: Abbey Seal
+      description: The stolen seal of Greyfen Abbey.
+      player_visible: false
+      location: varek
+
+    - id: lantern
+      name: Lantern
+      player:
+        name: Lantern
+        description: A small lantern.
+      player_visible: true
+      location: elin
+
+  connections:
+    - id: square-to-abbey
+      from: square
+      to: abbey
+      bidirectional: true
+      typical_travel_minutes: 25
+      player_visible: false
+
+  facts:
+    - id: weather
+      subject: square
+      text: Rain has made the square muddy.
+      known_by:
+        - elin
+
+    - id: culprit
+      subject: varek
+      text: Varek stole the abbey seal.
+      known_by: []
+
+  observations:
+    elin:
+      - square
+      - mara
+      - lantern
+
+# Prepared material is not necessarily authoritative Realm state yet.
+# It is material the Keeper may draw on and materialize only if play makes it
+# relevant. A traditional imported adventure may contain much more of this.
+prepared:
+  characters:
+    - id: brother-halvar
+      name: Brother Halvar
+      role: Keeper of relics and old records at Greyfen Abbey.
+      guidance: >
+        Use Halvar when the players seek knowledge about the abbey, its relics
+        or its history. If another established character has naturally taken
+        this role, do not force Halvar into the story.
+
+  places:
+    - id: abbey-scriptorium
+      name: Abbey Scriptorium
+      parent: abbey
+      guidance: >
+        Materialize this when play requires a place for records, scholarship or
+        Halvar's work.
+
+  story_seeds:
+    - id: red-wax
+      visibility: hidden
+      guidance: >
+        Red sealing wax may connect the stolen seal to a wider mystery if the
+        Keeper needs a thread beyond the immediate theft.
+
+# Future: deterministic world evolution. Conditions should be structured when
+# Realm must evaluate them exactly. Effects may either mutate Realm directly or
+# ask the Keeper to resolve a narrative situation.
+triggers:
+  - id: mara-enters-cellar
+    status: future
+    once: true
+    when:
+      entity_enters:
+        entity: mara
+        place: cellar
+    effects:
+      - narrative_situation:
+          visibility: hidden
+          guidance: >
+            Mara entering the cellar should create a meaningful complication.
+            Decide what happens from the current world state; do not contradict
+            established facts.
+
+  - id: abbey-bell-at-dusk
+    status: future
+    once: true
+    when:
+      time_reaches:
+        local_time: "18:00"
+    if:
+      fact_not_exists: abbey-bell-rang
+    effects:
+      - establish_fact:
+          id: abbey-bell-rang
+          text: The abbey bell rang at dusk.
+
+# Future: schedules are mechanical guidance for Realm, not pre-written story.
+schedules:
+  - id: halvar-workday
+    status: future
+    entity: brother-halvar
+    entries:
+      - during: day
+        location: abbey-scriptorium
+      - during: night
+        location: abbey
+
+objectives:
+  - id: recover-seal
+    visibility: public
+    text: Recover the stolen abbey seal.
+
+# Completion may eventually be structured, semantic, or a combination.
+# A semantic condition is deliberately evaluated by an AI/GM rather than by
+# pretending Realm can deterministically understand arbitrary prose.
+completion:
+  visibility: hidden
+  evaluator: keeper
+  condition: |
+    The abbey seal has been recovered and returned to an appropriate authority
+    at Greyfen Abbey, and the immediate threat surrounding its theft has been
+    resolved.
+  on_complete:
+    game_status: completed
+    allow_epilogue: true
+
+# Future: a package may contain a prepared chapter sequence, generate later
+# chapters from the resulting world, or mix both approaches.
+campaign:
+  status: future
+  chapter_generation:
+    mode: generate_after_prepared
+    guidance: |
+      Build later chapters from unresolved consequences and established Realm
+      state. Prefer existing people, places and factions over unnecessary new
+      ones. Never undo established facts merely to fit a planned story.
+
+  chapters:
+    - id: stolen-seal
+      title: The Stolen Seal
+      source: this-package
+      active_at_start: true
+      completion_ref: completion
+
+    # Illustrative prepared chapter. It need never be reached if play makes it
+    # inappropriate; Keeper should preserve player agency and established state.
+    - id: beneath-the-bell
+      title: Beneath the Bell
+      status: future
+      prepared: true
+      unlock_after: stolen-seal
+      guidance: |
+        If the wider mystery around the abbey is still relevant, develop the
+        consequences of the first chapter rather than resetting the world.
+
+# Optional source/provenance information is useful for generated/adapted
+# packages. Realm does not need to understand the source material itself.
+provenance:
+  kind: original
+  notes: >
+    Hand-authored vision example. A future Adventure Adapter could populate
+    equivalent fields from a traditional adventure while adapting unsupported
+    game-system mechanics semantically rather than emulating them.
