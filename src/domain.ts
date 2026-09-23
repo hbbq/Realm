@@ -1,4 +1,5 @@
 import type { RealmDatabase } from "./database.js";
+import { createHash } from "node:crypto";
 import { DomainError, requireValue } from "./errors.js";
 import { newId } from "./ids.js";
 import type { MutationRequest, MutationResult, StoredEvent, WorldPatch } from "./types.js";
@@ -8,6 +9,17 @@ type PendingEvent = { type: string; payload: Record<string, unknown> };
 
 const json = (value: unknown): string => JSON.stringify(value ?? {});
 const parse = <T>(value: string): T => JSON.parse(value) as T;
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item === undefined ? null : item)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).filter((key) => record[key] !== undefined).sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+const fingerprint = (request: MutationRequest): string => createHash("sha256").update(stableJson(request)).digest("hex");
+const sameJson = (left: unknown, right: unknown): boolean => stableJson(left) === stableJson(right);
 
 export class RealmService {
   constructor(private readonly db: RealmDatabase) {}
@@ -125,12 +137,23 @@ export class RealmService {
       const updateEntity = this.db.prepare("UPDATE entities SET name=COALESCE(?,name),description=COALESCE(?,description),properties_json=COALESCE(?,properties_json),player_name=COALESCE(?,player_name),player_description=COALESCE(?,player_description),player_properties_json=COALESCE(?,player_properties_json),player_visible=COALESCE(?,player_visible) WHERE game_id=? AND id=?");
       for (const update of updates) {
         const id = resolve(update.entity_id);
+        const before = this.entity(gameId, id)!;
+        const changed = (update.name !== undefined && update.name !== before.name)
+          || (update.description !== undefined && update.description !== before.description)
+          || (update.properties !== undefined && !sameJson(update.properties, parse(before.properties_json)))
+          || (update.player?.name !== undefined && update.player.name !== before.player_name)
+          || (update.player?.description !== undefined && update.player.description !== before.player_description)
+          || (update.player?.properties !== undefined && !sameJson(update.player.properties, parse(before.player_properties_json)))
+          || (update.player_visible !== undefined && update.player_visible !== Boolean(before.player_visible));
+        if (!changed) continue;
         updateEntity.run(update.name ?? null, update.description ?? null, update.properties === undefined ? null : json(update.properties), update.player?.name ?? null, update.player?.description ?? null, update.player?.properties === undefined ? null : json(update.player.properties), update.player_visible === undefined ? null : update.player_visible ? 1 : 0, gameId, id);
         events.push({ type: "EntityUpdated", payload: { entity_id: id } });
       }
       const setParent = this.db.prepare("INSERT INTO containment(game_id,child_entity_id,parent_entity_id) VALUES (?,?,?) ON CONFLICT(game_id,child_entity_id) DO UPDATE SET parent_entity_id=excluded.parent_entity_id");
       for (const edge of containments) {
         const child = resolve(edge.child_id), parent = resolve(edge.parent_id);
+        const before = this.db.prepare("SELECT parent_entity_id FROM containment WHERE game_id=? AND child_entity_id=?").get(gameId, child) as Row | undefined;
+        if (before?.parent_entity_id === parent) continue;
         setParent.run(gameId, child, parent);
         events.push({ type: "EntityMoved", payload: { entity_id: child, destination_id: parent } });
       }
@@ -164,6 +187,8 @@ export class RealmService {
       requireValue(entity, "ENTITY_NOT_FOUND", `entity not found: ${input.entity_id}`, 404);
       requireValue(destination, "ENTITY_NOT_FOUND", `destination not found: ${input.destination_id}`, 404);
       requireValue(input.entity_id !== input.destination_id, "CONTAINMENT_CYCLE", "an entity cannot contain itself");
+      const existing = this.db.prepare("SELECT parent_entity_id FROM containment WHERE game_id=? AND child_entity_id=?").get(gameId, input.entity_id) as Row | undefined;
+      if (existing?.parent_entity_id === input.destination_id) return [];
       let current: string | undefined = input.destination_id;
       while (current) {
         requireValue(current !== input.entity_id, "CONTAINMENT_CYCLE", "move would create a containment cycle");
@@ -270,26 +295,41 @@ export class RealmService {
   private mutate(gameId: string, kind: string, request: MutationRequest, change: (revision: number) => PendingEvent[]): MutationResult {
     requireValue(Number.isSafeInteger(request.expected_revision) && request.expected_revision >= 0, "INVALID_EXPECTED_REVISION", "expected_revision must be a non-negative integer");
     requireValue(typeof request.idempotency_key === "string" && request.idempotency_key.trim().length > 0, "INVALID_IDEMPOTENCY_KEY", "idempotency_key is required");
+    const requestFingerprint = fingerprint(request);
     const transaction = this.db.transaction(() => {
       const game = this.game(gameId);
-      const previous = this.db.prepare("SELECT revision_number,id FROM revisions WHERE game_id=? AND idempotency_key=?").get(gameId, request.idempotency_key) as Row | undefined;
-      if (previous) return this.mutationResult(gameId, previous.revision_number, previous.id, true);
+      const previous = this.db.prepare("SELECT mutation_kind,request_fingerprint,result_json FROM idempotency_records WHERE game_id=? AND idempotency_key=?")
+        .get(gameId, request.idempotency_key) as Row | undefined;
+      if (previous) {
+        requireValue(previous.mutation_kind === kind && previous.request_fingerprint === requestFingerprint && previous.result_json,
+          "IDEMPOTENCY_KEY_REUSED", "idempotency key was already used for a different request", 409);
+        return { ...parse<MutationResult>(previous.result_json), idempotent: true };
+      }
       requireValue(game.current_revision === request.expected_revision, "REVISION_CONFLICT", `expected revision ${request.expected_revision}, current revision is ${game.current_revision}`, 409);
       const revision = game.current_revision + 1;
       const revisionId = newId(), now = new Date().toISOString();
       const events = change(revision);
       if (events.length === 0) {
         const current = this.db.prepare("SELECT id FROM revisions WHERE game_id=? AND revision_number=?").get(gameId, game.current_revision) as Row;
-        return { revision: game.current_revision, revision_id: current.id, events: [], idempotent: false };
+        const result = { revision: game.current_revision, revision_id: current.id, events: [], idempotent: false };
+        this.recordIdempotency(gameId, request.idempotency_key, kind, requestFingerprint, result, now);
+        return result;
       }
       this.db.prepare("INSERT INTO revisions(game_id,revision_number,id,mutation_kind,idempotency_key,created_at,metadata_json) VALUES (?,?,?,?,?,?,?)")
         .run(gameId, revision, revisionId, kind, request.idempotency_key, now, "{}");
       const insertEvent = this.db.prepare("INSERT INTO events(game_id,revision_number,ordinal,type,payload_json,created_at) VALUES (?,?,?,?,?,?)");
       events.forEach((event, ordinal) => insertEvent.run(gameId, revision, ordinal, event.type, json(event.payload), now));
       this.db.prepare("UPDATE games SET current_revision=? WHERE id=?").run(revision, gameId);
-      return this.mutationResult(gameId, revision, revisionId, false);
+      const result = this.mutationResult(gameId, revision, revisionId, false);
+      this.recordIdempotency(gameId, request.idempotency_key, kind, requestFingerprint, result, now);
+      return result;
     });
     return transaction();
+  }
+
+  private recordIdempotency(gameId: string, key: string, kind: string, requestFingerprint: string, result: MutationResult, createdAt: string): void {
+    this.db.prepare("INSERT INTO idempotency_records(game_id,idempotency_key,mutation_kind,request_fingerprint,result_json,created_at) VALUES (?,?,?,?,?,?)")
+      .run(gameId, key, kind, requestFingerprint, json(result), createdAt);
   }
 
   private mutationResult(gameId: string, revision: number, revisionId: string, idempotent: boolean): MutationResult {

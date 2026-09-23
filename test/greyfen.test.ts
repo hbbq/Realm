@@ -242,10 +242,95 @@ test("repeated knowledge and observation writes emit only real transitions", asy
   assert.equal(repeatedObservation.json().revision, 2);
   assert.deepEqual(repeatedObservation.json().events, []);
 
+  const advance = await app.inject({ method: "POST", url: `/games/${gameId}/operations/advance-time`, payload: {
+    expected_revision: 2, idempotency_key: "intervening-change", minutes: 1
+  }});
+  assert.equal(advance.statusCode, 200, advance.body);
+  assert.equal(advance.json().revision, 3);
+
+  const revealRetry = await app.inject({ method: "POST", url: `/games/${gameId}/operations/reveal-fact`, payload: {
+    expected_revision: 2, idempotency_key: "repeat-reveal", actor_id: "actor", fact_id: "fact"
+  }});
+  assert.equal(revealRetry.statusCode, 200, revealRetry.body);
+  assert.deepEqual(revealRetry.json(), { ...repeatedReveal.json(), idempotent: true });
+
   const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
-  assert.equal(state.game.current_revision, 2);
+  assert.equal(state.game.current_revision, 3);
   assert.equal(state.knowledge.length, 1);
   assert.equal(state.observations.length, 1);
   const revisions = (await app.inject({ method: "GET", url: `/games/${gameId}/revisions` })).json();
-  assert.deepEqual(revisions.map((revision: any) => revision.revision_number), [1, 2]);
+  assert.deepEqual(revisions.map((revision: any) => revision.revision_number), [1, 2, 3]);
+});
+
+test("moves and world patches omit audit transitions for unchanged state", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "noop-seed",
+    entities: [
+      { id: "room", kind: "place", name: "Room" },
+      { id: "actor", kind: "creature", name: "Actor", description: "Still here", properties: { a: 1, b: 2 }, player: { properties: { seen: true } }, player_visible: true }
+    ],
+    containment: [{ child_id: "actor", parent_id: "room" }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+
+  const move = await app.inject({ method: "POST", url: `/games/${gameId}/operations/move`, payload: {
+    expected_revision: 1, idempotency_key: "same-move", entity_id: "actor", destination_id: "room"
+  }});
+  assert.equal(move.statusCode, 200, move.body);
+  assert.equal(move.json().revision, 1);
+  assert.deepEqual(move.json().events, []);
+
+  const patch = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 1, idempotency_key: "same-patch",
+    entity_updates: [
+      { entity_id: "actor" },
+      { entity_id: "actor", name: "Actor", description: "Still here", properties: { b: 2, a: 1 }, player: { properties: { seen: true } }, player_visible: true }
+    ],
+    containment: [{ child_id: "actor", parent_id: "room" }]
+  }});
+  assert.equal(patch.statusCode, 201, patch.body);
+  assert.equal(patch.json().revision, 1);
+  assert.deepEqual(patch.json().events, []);
+
+  const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.game.current_revision, 1);
+  const revisions = (await app.inject({ method: "GET", url: `/games/${gameId}/revisions` })).json();
+  assert.deepEqual(revisions.map((revision: any) => revision.revision_number), [1]);
+});
+
+test("idempotency keys are bound to mutation kind and stable request payload", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "binding-seed",
+    entities: [{ id: "actor", kind: "creature", name: "Actor", properties: { first: 1, second: 2 } }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+
+  const reorderedRetry = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    idempotency_key: "binding-seed", expected_revision: 0,
+    entities: [{ properties: { second: 2, first: 1 }, name: "Actor", kind: "creature", id: "actor" }]
+  }});
+  assert.equal(reorderedRetry.statusCode, 201, reorderedRetry.body);
+  assert.deepEqual(reorderedRetry.json(), { ...seed.json(), idempotent: true });
+
+  const changedPayload = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "binding-seed",
+    entities: [{ id: "actor", kind: "creature", name: "Changed" }]
+  }});
+  assert.equal(changedPayload.statusCode, 409, changedPayload.body);
+  assert.equal(changedPayload.json().error, "IDEMPOTENCY_KEY_REUSED");
+
+  const changedKind = await app.inject({ method: "POST", url: `/games/${gameId}/operations/advance-time`, payload: {
+    expected_revision: 0, idempotency_key: "binding-seed", minutes: 5
+  }});
+  assert.equal(changedKind.statusCode, 409, changedKind.body);
+  assert.equal(changedKind.json().error, "IDEMPOTENCY_KEY_REUSED");
+
+  const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.game.current_revision, 1);
+  assert.equal(state.game.world_time_minutes, 0);
+  assert.equal(state.entities[0].name, "Actor");
 });
