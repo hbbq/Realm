@@ -1,6 +1,6 @@
 # Realm v1 vertical slice
 
-Realm is a small standalone HTTP service for authoritative role-playing world state. This slice proves the state boundaries in [VISION.md](VISION.md) and [STATE_MODEL.md](STATE_MODEL.md) without Keeper, Resident, a UI, or any AI dependency.
+Realm is a small standalone HTTP service for authoritative role-playing world state. This slice proves the state boundaries in [VISION.md](VISION.md) and [STATE_MODEL.md](STATE_MODEL.md) without Keeper, Resident, or any AI dependency. A minimal read-only Web Companion is included for inspection.
 
 ## Run
 
@@ -15,6 +15,8 @@ REALM_DATABASE=realm.sqlite npm start
 
 The server listens on `127.0.0.1:3000` by default. `HOST` and `PORT` override this. SQL migrations in `migrations/` run at startup.
 
+Open `http://127.0.0.1:3000/companion` to inspect a game. Select a game, then choose **All** for authoritative state or a creature actor for Realm's player projection. The revision list loads each revision's events when opened. The companion and history are trusted developer/GM surfaces and expose hidden canon; the service has no authentication. Serve it only in a trusted environment.
+
 ## API surface
 
 The API is intentionally split into trusted authoring/inspection routes and actor-scoped player reads. V1 is a trusted development service and has no authentication.
@@ -22,6 +24,8 @@ The API is intentionally split into trusted authoring/inspection routes and acto
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `POST` | `/games` | Create a game at revision 0 |
+| `GET` | `/games` | List games for selection (ID, title, world time, revision, creation time) |
+| `GET` | `/companion` | Open the read-only Web Companion |
 | `POST` | `/games/:id/world-patches` | Atomically materialize related entities, containment, connections, facts, knowledge, and observations |
 | `POST` | `/games/:id/operations/move` | Change one entity's physical parent |
 | `POST` | `/games/:id/operations/advance-time` | Advance the authoritative clock |
@@ -61,7 +65,7 @@ Facts use text, an optional entity subject, and metadata. Entity properties are 
 
 Included now: games, place/creature/item entities, containment, place connections, facts, actor knowledge, observations, atomic WorldPatch, move/reveal/observe/establish/time operations, revisions, events, world time, and isolated game scope.
 
-Deferred: authentication, generic components, factions, situations, beliefs, schedules, portals and locks, ownership, combat, rules and dice, rollback, replay, branching, richer visibility, companion UI, Resident, Keeper, and AI integration.
+Deferred: authentication, generic components, factions, situations, beliefs, schedules, portals and locks, ownership, combat, rules and dice, rollback, replay, branching, richer visibility, a richer companion UI, Resident, Keeper, and AI integration.
 
 ## Tests
 
