@@ -24,6 +24,12 @@ const sameJson = (left: unknown, right: unknown): boolean => stableJson(left) ==
 export class RealmService {
   constructor(private readonly db: RealmDatabase) {}
 
+  games() {
+    return this.db.prepare("SELECT id,title,world_time_minutes,current_revision,created_at FROM games ORDER BY created_at,rowid").all() as {
+      id: string; title: string; world_time_minutes: number; current_revision: number; created_at: string
+    }[];
+  }
+
   createGame(input: { title: string; definition?: Record<string, unknown>; world_time_minutes?: number }) {
     requireValue(input.title?.trim(), "INVALID_TITLE", "title is required");
     const worldTime = input.world_time_minutes ?? 0;

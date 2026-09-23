@@ -4,6 +4,8 @@ import { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import type { RealmDatabase } from "./database.js";
 import { DomainError } from "./errors.js";
 import { RealmService } from "./domain.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const Id = Type.String({ minLength: 1, maxLength: 200 });
 const JsonObject = Type.Record(Type.String(), Type.Unknown());
@@ -44,6 +46,9 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+  app.get("/companion", async (_request, reply) => reply.type("text/html; charset=utf-8")
+    .send(readFileSync(join(process.cwd(), "web", "companion.html"), "utf8")));
+  app.get("/games", async () => realm.games());
   app.post("/games", { schema: { body: Type.Object({ title: Type.String({ minLength: 1 }), definition: Type.Optional(JsonObject), world_time_minutes: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }) } }, async (request, reply) => reply.status(201).send(realm.createGame(request.body)));
   app.post("/games/:gameId/world-patches", { schema: { params: GameParams, body: WorldPatchSchema } }, async (request, reply) => reply.status(201).send(realm.applyWorldPatch(request.params.gameId, request.body as Static<typeof WorldPatchSchema>)));
 

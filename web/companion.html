@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Realm Web Companion</title>
+  <style>
+    :root { color-scheme: light; font: 15px/1.5 system-ui, sans-serif; background: #f5f6f4; color: #17231d; }
+    body { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin: 0 0 .25rem; } h2 { margin-top: 2rem; }
+    .muted { color: #526258; } .error { color: #9b2424; }
+    .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 1rem; margin: 1.5rem 0; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    select, button { font: inherit; padding: .4rem .6rem; }
+    select { min-width: 14rem; max-width: 100%; }
+    button { cursor: pointer; }
+    section, details { background: white; border: 1px solid #d4ded7; border-radius: 5px; padding: .8rem 1rem; margin: .75rem 0; }
+    section section { background: #fafbfa; }
+    section h3 { margin: 0 0 .5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .6rem; }
+    .grid section { margin: 0; }
+    dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .15rem .75rem; margin: .4rem 0; }
+    dt { font-weight: 600; color: #415449; } dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    table { border-collapse: collapse; width: 100%; display: block; overflow-x: auto; }
+    th, td { border-bottom: 1px solid #e0e6e1; padding: .4rem .7rem .4rem 0; text-align: left; vertical-align: top; }
+    code, pre { font: 13px/1.45 ui-monospace, Consolas, monospace; }
+    pre { overflow: auto; background: #f2f4f2; padding: .75rem; margin: .4rem 0; }
+    .json-key { color: #73449d; } .json-string { color: #176b39; }
+    .json-number { color: #a14a0c; } .json-literal { color: #126597; }
+    summary { cursor: pointer; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>Realm Web Companion</h1>
+  <div class="muted">Read-only state inspector for trusted developers and GMs.</div>
+  <div class="controls">
+    <label>Game <select id="game"></select></label>
+    <label>State view <select id="view"><option value="">All</option></select></label>
+    <button id="refresh" type="button">Refresh</button>
+  </div>
+  <p id="status" role="status"></p>
+  <main>
+    <h2>Current state</h2>
+    <div id="state"></div>
+    <h2>Revision and event history</h2>
+    <p class="muted">Trusted GM/developer audit history. Events are shown for every revision, including in actor mode.</p>
+    <div id="history"></div>
+  </main>
+  <script>
+    const gameSelect = document.querySelector('#game');
+    const viewSelect = document.querySelector('#view');
+    const stateRoot = document.querySelector('#state');
+    const historyRoot = document.querySelector('#history');
+    const status = document.querySelector('#status');
+    let selection = 0;
+    let stateRequest = 0;
+    let authoritative = null;
+
+    function element(tag, value, className) {
+      const node = document.createElement(tag);
+      if (value !== undefined) node.textContent = String(value);
+      if (className) node.className = className;
+      return node;
+    }
+    function message(value, isError = false) {
+      status.textContent = value;
+      status.className = isError ? 'error' : 'muted';
+    }
+    async function get(path) {
+      const response = await fetch(path);
+      if (!response.ok) {
+        let detail = response.statusText;
+        try { detail = (await response.json()).message || detail; } catch (_) { /* Use status text. */ }
+        throw new Error(`${response.status}: ${detail}`);
+      }
+      return response.json();
+    }
+    function option(value, label) {
+      const node = element('option', label);
+      node.value = value;
+      return node;
+    }
+    function display(value) {
+      if (value === null) return 'null';
+      if (typeof value === 'object') return JSON.stringify(value, null, 2);
+      return String(value);
+    }
+    function fields(record) {
+      const list = element('dl');
+      for (const [key, value] of Object.entries(record)) {
+        list.append(element('dt', key.replaceAll('_', ' ')));
+        const cell = element('dd');
+        if (value !== null && typeof value === 'object') {
+          cell.append(element('pre', display(value)));
+        } else {
+          cell.textContent = display(value);
+        }
+        list.append(cell);
+      }
+      return list;
+    }
+    function renderState(state) {
+      stateRoot.replaceChildren();
+      const game = element('section');
+      game.append(element('h3', 'Game'), fields(state.game));
+      if (state.actor_id) game.append(fields({ actor_id: state.actor_id }));
+      stateRoot.append(game);
+      for (const [key, value] of Object.entries(state)) {
+        if (key === 'game' || key === 'actor_id') continue;
+        const section = element('section');
+        section.append(element('h3', `${key.replaceAll('_', ' ')} (${Array.isArray(value) ? value.length : 1})`));
+        if (Array.isArray(value) && value.length === 0) {
+          section.append(element('p', 'None', 'muted'));
+        } else if (Array.isArray(value)) {
+          const grid = element('div', undefined, 'grid');
+          for (const item of value) {
+            const card = element('section');
+            card.append(fields(item));
+            grid.append(card);
+          }
+          section.append(grid);
+        } else {
+          section.append(fields(value));
+        }
+        stateRoot.append(section);
+      }
+    }
+    function highlightedJson(value) {
+      const code = element('code');
+      const source = JSON.stringify(value, null, 2);
+      const tokens = /"(?:\\.|[^"\\])*"(?=\s*:)|"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\b(?:true|false|null)\b/g;
+      let offset = 0;
+      for (const match of source.matchAll(tokens)) {
+        code.append(document.createTextNode(source.slice(offset, match.index)));
+        const token = match[0];
+        const kind = token[0] === '"' ? (/^\s*:/.test(source.slice(match.index + token.length)) ? 'key' : 'string')
+          : /^(true|false|null)$/.test(token) ? 'literal' : 'number';
+        code.append(element('span', token, `json-${kind}`));
+        offset = match.index + token.length;
+      }
+      code.append(document.createTextNode(source.slice(offset)));
+      return code;
+    }
+    function renderEvents(container, revisionNumber, events) {
+      container.replaceChildren();
+      if (!events.length) { container.append(element('p', 'No events.', 'muted')); return; }
+      for (const event of events) {
+        const block = element('section');
+        block.append(element('strong', `${revisionNumber}.${event.ordinal}  ${event.type}`));
+        block.append(fields({ created_at: event.created_at }));
+        const payload = element('pre');
+        payload.append(highlightedJson(event.payload));
+        block.append(payload);
+        container.append(block);
+      }
+    }
+    function renderHistory(gameId, revisions, ticket) {
+      historyRoot.replaceChildren();
+      if (!revisions.length) { historyRoot.append(element('p', 'No revisions yet.', 'muted')); return; }
+      for (const revision of [...revisions].reverse()) {
+        const details = element('details');
+        details.append(element('summary', `Revision ${revision.revision_number} · ${revision.mutation_kind} · ${revision.created_at}`));
+        details.append(fields({ id: revision.id, idempotency_key: revision.idempotency_key, metadata: revision.metadata }));
+        const eventsRoot = element('div');
+        details.append(eventsRoot);
+        details.addEventListener('toggle', async () => {
+          if (!details.open || details.dataset.loaded) return;
+          details.dataset.loaded = 'true';
+          eventsRoot.append(element('p', 'Loading events…', 'muted'));
+          try {
+            const events = await get(`/games/${encodeURIComponent(gameId)}/revisions/${revision.revision_number}/events`);
+            if (ticket === selection) renderEvents(eventsRoot, revision.revision_number, events);
+          } catch (error) {
+            if (ticket === selection) {
+              eventsRoot.replaceChildren(element('p', `Could not load events: ${error.message}`, 'error'));
+              delete details.dataset.loaded;
+            }
+          }
+        });
+        historyRoot.append(details);
+      }
+    }
+    async function loadState(ticket) {
+      const request = ++stateRequest;
+      const gameId = gameSelect.value;
+      if (!gameId || !authoritative) return;
+      stateRoot.replaceChildren(element('p', 'Loading state…', 'muted'));
+      try {
+        const state = viewSelect.value
+          ? await get(`/games/${encodeURIComponent(gameId)}/state?actor_id=${encodeURIComponent(viewSelect.value)}`)
+          : authoritative;
+        if (ticket === selection && request === stateRequest) renderState(state);
+      } catch (error) {
+        if (ticket === selection && request === stateRequest) stateRoot.replaceChildren(element('p', `Could not load state: ${error.message}`, 'error'));
+      }
+    }
+    async function loadGame() {
+      const ticket = ++selection;
+      const gameId = gameSelect.value;
+      authoritative = null;
+      viewSelect.replaceChildren(option('', 'All'));
+      viewSelect.disabled = !gameId;
+      stateRoot.replaceChildren();
+      historyRoot.replaceChildren();
+      if (!gameId) return;
+      message('Loading game…');
+      try {
+        const [state, revisions] = await Promise.all([
+          get(`/games/${encodeURIComponent(gameId)}/authoritative-state`),
+          get(`/games/${encodeURIComponent(gameId)}/revisions`)
+        ]);
+        if (ticket !== selection) return;
+        authoritative = state;
+        for (const actor of state.entities.filter(entity => entity.kind === 'creature')) {
+          viewSelect.append(option(actor.id, `${actor.name} (${actor.id})`));
+        }
+        renderHistory(gameId, revisions, ticket);
+        loadState(ticket);
+        message('');
+      } catch (error) {
+        if (ticket === selection) message(`Could not load game: ${error.message}`, true);
+      }
+    }
+    async function loadGames() {
+      gameSelect.disabled = true;
+      viewSelect.disabled = true;
+      message('Loading games…');
+      try {
+        const games = await get('/games');
+        gameSelect.replaceChildren(option('', games.length ? 'Select a game' : 'No games available'));
+        for (const game of games) gameSelect.append(option(game.id, `${game.title} (${game.id})`));
+        gameSelect.disabled = !games.length;
+        message(games.length ? '' : 'No games exist yet. Create one through the Realm API.');
+      } catch (error) {
+        message(`Could not list games: ${error.message}`, true);
+      }
+    }
+    gameSelect.addEventListener('change', loadGame);
+    viewSelect.addEventListener('change', () => loadState(selection));
+    document.querySelector('#refresh').addEventListener('click', async () => {
+      const selected = gameSelect.value;
+      await loadGames();
+      if (selected && [...gameSelect.options].some(item => item.value === selected)) {
+        gameSelect.value = selected;
+        await loadGame();
+      }
+    });
+    loadGames();
+  </script>
+</body>
+</html>
