@@ -48,6 +48,8 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
   app.get("/health", async () => ({ status: "ok" }));
   app.get("/companion", async (_request, reply) => reply.type("text/html; charset=utf-8")
     .send(readFileSync(join(process.cwd(), "web", "companion.html"), "utf8")));
+  app.get("/companion-map.js", async (_request, reply) => reply.type("text/javascript; charset=utf-8")
+    .send(readFileSync(join(process.cwd(), "web", "companion-map.js"), "utf8")));
   app.get("/games", async () => realm.games());
   app.post("/games", { schema: { body: Type.Object({ title: Type.String({ minLength: 1 }), definition: Type.Optional(JsonObject), world_time_minutes: Type.Optional(Type.Integer({ minimum: 0 })) }, { additionalProperties: false }) } }, async (request, reply) => reply.status(201).send(realm.createGame(request.body)));
   app.post("/games/:gameId/world-patches", { schema: { params: GameParams, body: WorldPatchSchema } }, async (request, reply) => reply.status(201).send(realm.applyWorldPatch(request.params.gameId, request.body as Static<typeof WorldPatchSchema>)));

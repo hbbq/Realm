@@ -47,6 +47,11 @@ test("companion lists games and serves its same-origin inspector", async () => {
   assert.match(page.body, /\/authoritative-state/);
   assert.match(page.body, /actor_id=/);
   assert.match(page.body, /\/revisions/);
+  assert.match(page.body, /\/companion-map\.js/);
+  assert.match(page.body, /realmMapSource\(state\)/);
+  const mapScript = await app.inject({ method: "GET", url: "/companion-map.js" });
+  assert.equal(mapScript.statusCode, 200);
+  assert.match(mapScript.headers["content-type"] || "", /javascript/);
 });
 
 test("Greyfen scenario exercises the complete API slice without leaking hidden canon", async () => {

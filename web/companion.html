@@ -36,6 +36,7 @@
     .json-key { color: #d7a9ff; } .json-string { color: #a9dfaa; }
     .json-number { color: #ffc28c; } .json-literal { color: #8dcfff; }
     summary { cursor: pointer; font-weight: 600; }
+    #map-diagram { overflow-x: auto; }
     @media (max-width: 600px) { body { padding: .7rem; } .controls label { flex: 1 1 100%; } select { width: 100%; } dl { grid-template-columns: minmax(0, 1fr); } dt { margin-top: .25rem; } }
   </style>
 </head>
@@ -57,6 +58,7 @@
       <div id="history"></div>
     </div>
   </main>
+  <script src="/companion-map.js"></script>
   <script>
     const gameSelect = document.querySelector('#game');
     const viewSelect = document.querySelector('#view');
@@ -69,6 +71,33 @@
     let stateRequest = 0;
     let authoritative = null;
     let activeTab = 'game';
+    let mapRequest = 0;
+    let mermaidPromise;
+
+    function mermaidLibrary() {
+      if (!mermaidPromise) mermaidPromise = import('https://cdn.jsdelivr.net/npm/mermaid@11.12.2/dist/mermaid.esm.min.mjs')
+        .then(({ default: mermaid }) => {
+          mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', flowchart: { htmlLabels: false } });
+          return mermaid;
+        });
+      return mermaidPromise;
+    }
+    async function renderMap(state, root) {
+      const request = ++mapRequest;
+      if (!state.entities.some(entity => entity.kind === 'place')) {
+        root.append(element('p', 'No places in this state.', 'muted'));
+        return;
+      }
+      root.append(element('p', 'Rendering map…', 'muted'));
+      try {
+        const mermaid = await mermaidLibrary();
+        if (request !== mapRequest) return;
+        const { svg } = await mermaid.render(`realm-map-${request}`, realmMapSource(state));
+        if (request === mapRequest) root.innerHTML = svg;
+      } catch (error) {
+        if (request === mapRequest) root.replaceChildren(element('p', `Could not render map: ${error.message}`, 'error'));
+      }
+    }
 
     function element(tag, value, className) {
       const node = document.createElement(tag);
@@ -164,6 +193,14 @@
       game.append(element('h3', 'Game'), fields(state.game));
       if (state.actor_id) game.append(fields({ actor_id: state.actor_id }));
       gamePanel.append(game);
+      const mapPanel = statePanel('map', 'Map');
+      const mapSection = element('section');
+      mapSection.append(element('h3', 'World map'));
+      const mapDiagram = element('div');
+      mapDiagram.id = 'map-diagram';
+      mapSection.append(mapDiagram);
+      mapPanel.append(mapSection);
+      renderMap(state, mapDiagram);
       for (const [key, value] of Object.entries(state)) {
         if (key === 'game' || key === 'actor_id') continue;
         const label = key.replaceAll('_', ' ');
@@ -261,10 +298,11 @@
         if (ticket === selection && request === stateRequest) message(`Could not load state: ${error.message}`, true);
       }
     }
-    async function loadGame() {
+    async function loadGame(selectedView = '') {
       const ticket = ++selection;
       const gameId = gameSelect.value;
       authoritative = null;
+      ++mapRequest;
       viewSelect.replaceChildren(option('', 'All'));
       viewSelect.disabled = !gameId;
       stateRoot.replaceChildren();
@@ -283,6 +321,7 @@
         for (const actor of state.entities.filter(entity => entity.kind === 'creature')) {
           viewSelect.append(option(actor.id, `${actor.name} (${actor.id})`));
         }
+        if ([...viewSelect.options].some(item => item.value === selectedView)) viewSelect.value = selectedView;
         renderHistory(gameId, revisions, ticket);
         await loadState(ticket);
       } catch (error) {
@@ -303,14 +342,15 @@
         message(`Could not list games: ${error.message}`, true);
       }
     }
-    gameSelect.addEventListener('change', loadGame);
+    gameSelect.addEventListener('change', () => loadGame());
     viewSelect.addEventListener('change', () => loadState(selection));
     document.querySelector('#refresh').addEventListener('click', async () => {
       const selected = gameSelect.value;
+      const selectedView = viewSelect.value;
       await loadGames();
       if (selected && [...gameSelect.options].some(item => item.value === selected)) {
         gameSelect.value = selected;
-        await loadGame();
+        await loadGame(selectedView);
       }
     });
     loadGames();

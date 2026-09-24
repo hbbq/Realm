@@ -15,7 +15,7 @@ REALM_DATABASE=realm.sqlite npm start
 
 The server listens on `127.0.0.1:3000` by default. `HOST` and `PORT` override this. SQL migrations in `migrations/` run at startup.
 
-Open `http://127.0.0.1:3000/companion` to inspect a game. Select a game, then choose **All** for authoritative state or a creature actor for Realm's player projection. The revision list loads each revision's events when opened. The companion and history are trusted developer/GM surfaces and expose hidden canon; the service has no authentication. Serve it only in a trusted environment.
+Open `http://127.0.0.1:3000/companion` to inspect a game. Select a game, then choose **All** for authoritative state or a creature actor for Realm's player projection. The Map tab shows places, contents, and connections from the selected state; it loads Mermaid from jsDelivr, so the map needs internet access. The revision list loads each revision's events when opened. The companion and history are trusted developer/GM surfaces and expose hidden canon; the service has no authentication. Serve it only in a trusted environment.
 
 ## API surface
 
