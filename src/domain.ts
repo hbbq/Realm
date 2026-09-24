@@ -134,25 +134,26 @@ export class RealmService {
       }
 
       const events: PendingEvent[] = [];
-      const insertEntity = this.db.prepare("INSERT INTO entities(game_id,id,kind,name,description,properties_json,player_name,player_description,player_properties_json,player_visible) VALUES (?,?,?,?,?,?,?,?,?,?)");
+      const insertEntity = this.db.prepare("INSERT INTO entities(game_id,id,kind,name,description,appearance,properties_json,player_name,player_description,player_properties_json,player_visible) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
       for (const entity of creates) {
         const resolvedId = entity.id!;
-        insertEntity.run(gameId, resolvedId, entity.kind, entity.name.trim(), entity.description ?? "", json(entity.properties), entity.player?.name ?? null, entity.player?.description ?? null, json(entity.player?.properties), entity.player_visible ? 1 : 0);
+        insertEntity.run(gameId, resolvedId, entity.kind, entity.name.trim(), entity.description ?? "", entity.appearance ?? null, json(entity.properties), entity.player?.name ?? null, entity.player?.description ?? null, json(entity.player?.properties), entity.player_visible ? 1 : 0);
         events.push({ type: "EntityCreated", payload: { entity_id: resolvedId, kind: entity.kind, ...(entity.ref ? { ref: entity.ref } : {}) } });
       }
-      const updateEntity = this.db.prepare("UPDATE entities SET name=COALESCE(?,name),description=COALESCE(?,description),properties_json=COALESCE(?,properties_json),player_name=COALESCE(?,player_name),player_description=COALESCE(?,player_description),player_properties_json=COALESCE(?,player_properties_json),player_visible=COALESCE(?,player_visible) WHERE game_id=? AND id=?");
+      const updateEntity = this.db.prepare("UPDATE entities SET name=COALESCE(?,name),description=COALESCE(?,description),appearance=COALESCE(?,appearance),properties_json=COALESCE(?,properties_json),player_name=COALESCE(?,player_name),player_description=COALESCE(?,player_description),player_properties_json=COALESCE(?,player_properties_json),player_visible=COALESCE(?,player_visible) WHERE game_id=? AND id=?");
       for (const update of updates) {
         const id = resolve(update.entity_id);
         const before = this.entity(gameId, id)!;
         const changed = (update.name !== undefined && update.name !== before.name)
           || (update.description !== undefined && update.description !== before.description)
+          || (update.appearance !== undefined && update.appearance !== before.appearance)
           || (update.properties !== undefined && !sameJson(update.properties, parse(before.properties_json)))
           || (update.player?.name !== undefined && update.player.name !== before.player_name)
           || (update.player?.description !== undefined && update.player.description !== before.player_description)
           || (update.player?.properties !== undefined && !sameJson(update.player.properties, parse(before.player_properties_json)))
           || (update.player_visible !== undefined && update.player_visible !== Boolean(before.player_visible));
         if (!changed) continue;
-        updateEntity.run(update.name ?? null, update.description ?? null, update.properties === undefined ? null : json(update.properties), update.player?.name ?? null, update.player?.description ?? null, update.player?.properties === undefined ? null : json(update.player.properties), update.player_visible === undefined ? null : update.player_visible ? 1 : 0, gameId, id);
+        updateEntity.run(update.name ?? null, update.description ?? null, update.appearance ?? null, update.properties === undefined ? null : json(update.properties), update.player?.name ?? null, update.player?.description ?? null, update.player?.properties === undefined ? null : json(update.player.properties), update.player_visible === undefined ? null : update.player_visible ? 1 : 0, gameId, id);
         events.push({ type: "EntityUpdated", payload: { entity_id: id } });
       }
       const setParent = this.db.prepare("INSERT INTO containment(game_id,child_entity_id,parent_entity_id) VALUES (?,?,?) ON CONFLICT(game_id,child_entity_id) DO UPDATE SET parent_entity_id=excluded.parent_entity_id");
@@ -383,7 +384,7 @@ export class RealmService {
   }
   private entity(gameId: string, id: string): Row | undefined { return this.db.prepare("SELECT * FROM entities WHERE game_id=? AND id=?").get(gameId, id) as Row | undefined; }
   private mapGame = (r: Row) => ({ id: r.id, title: r.title, definition: parse(r.definition_json), world_time_minutes: r.world_time_minutes, current_revision: r.current_revision, created_at: r.created_at });
-  private mapEntity = (r: Row) => ({ id: r.id, kind: r.kind, name: r.name, description: r.description, properties: parse(r.properties_json), player_projection: { name: r.player_name, description: r.player_description, properties: parse(r.player_properties_json) }, player_visible: Boolean(r.player_visible) });
+  private mapEntity = (r: Row) => ({ id: r.id, kind: r.kind, name: r.name, description: r.description, appearance: r.appearance, properties: parse(r.properties_json), player_projection: { name: r.player_name, description: r.player_description, properties: parse(r.player_properties_json) }, player_visible: Boolean(r.player_visible) });
   private mapPlayerEntity = (r: Row, actorId: string) => ({ id: r.id, kind: r.kind, name: r.player_name ?? (r.id === actorId ? r.name : null), description: r.player_description, properties: parse(r.player_properties_json) });
   private mapConnection = (r: Row) => ({ id: r.id, from_place_id: r.from_place_id, to_place_id: r.to_place_id, bidirectional: Boolean(r.bidirectional), typical_travel_minutes: r.typical_travel_minutes, player_visible: Boolean(r.player_visible) });
   private mapFact = (r: Row) => ({ id: r.id, text: r.text, subject_entity_id: r.subject_entity_id, metadata: parse(r.metadata_json) });

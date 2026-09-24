@@ -6,6 +6,7 @@ export interface EntityInput {
   kind: EntityKind;
   name: string;
   description?: string;
+  appearance?: string;
   properties?: Record<string, unknown>;
   player?: { name?: string; description?: string; properties?: Record<string, unknown> };
   player_visible?: boolean;
@@ -15,6 +16,7 @@ export interface EntityUpdate {
   entity_id: string;
   name?: string;
   description?: string;
+  appearance?: string;
   properties?: Record<string, unknown>;
   player?: { name?: string; description?: string; properties?: Record<string, unknown> };
   player_visible?: boolean;

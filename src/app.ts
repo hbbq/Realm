@@ -20,14 +20,14 @@ const Entity = Type.Object({
   id: Type.Optional(Id), ref: Type.Optional(Id),
   kind: Type.Union([Type.Literal("place"), Type.Literal("creature"), Type.Literal("item")]),
   name: Type.String({ minLength: 1, maxLength: 500 }),
-  description: Type.Optional(Type.String()), properties: Type.Optional(JsonObject),
+  description: Type.Optional(Type.String()), appearance: Type.Optional(Type.String()), properties: Type.Optional(JsonObject),
   player: Type.Optional(Type.Object({ name: Type.Optional(Type.String()), description: Type.Optional(Type.String()), properties: Type.Optional(JsonObject) }, { additionalProperties: false })),
   player_visible: Type.Optional(Type.Boolean())
 }, { additionalProperties: false });
 const WorldPatchSchema = Type.Object({
   ...Mutation,
   entities: Type.Optional(Type.Array(Entity)),
-  entity_updates: Type.Optional(Type.Array(Type.Object({ entity_id: Id, name: Type.Optional(Type.String({ minLength: 1 })), description: Type.Optional(Type.String()), properties: Type.Optional(JsonObject), player: Type.Optional(Type.Object({ name: Type.Optional(Type.String()), description: Type.Optional(Type.String()), properties: Type.Optional(JsonObject) }, { additionalProperties: false })), player_visible: Type.Optional(Type.Boolean()) }, { additionalProperties: false }))),
+  entity_updates: Type.Optional(Type.Array(Type.Object({ entity_id: Id, name: Type.Optional(Type.String({ minLength: 1 })), description: Type.Optional(Type.String()), appearance: Type.Optional(Type.String()), properties: Type.Optional(JsonObject), player: Type.Optional(Type.Object({ name: Type.Optional(Type.String()), description: Type.Optional(Type.String()), properties: Type.Optional(JsonObject) }, { additionalProperties: false })), player_visible: Type.Optional(Type.Boolean()) }, { additionalProperties: false }))),
   containment: Type.Optional(Type.Array(Type.Object({ child_id: Id, parent_id: Id }, { additionalProperties: false }))),
   connections: Type.Optional(Type.Array(Type.Object({ id: Type.Optional(Id), ref: Type.Optional(Id), from_place_id: Id, to_place_id: Id, bidirectional: Type.Optional(Type.Boolean()), typical_travel_minutes: Type.Optional(Type.Integer({ minimum: 0 })), player_visible: Type.Optional(Type.Boolean()) }, { additionalProperties: false }))),
   facts: Type.Optional(Type.Array(Type.Object({ id: Type.Optional(Id), ref: Type.Optional(Id), text: Type.String({ minLength: 1 }), subject_entity_id: Type.Optional(Id), metadata: Type.Optional(JsonObject) }, { additionalProperties: false }))),

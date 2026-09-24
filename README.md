@@ -79,7 +79,9 @@ The actor-scoped route is a purpose-built projection:
 
 This is deliberately smaller than a general ACL or per-field visibility system.
 
-The worker only uses explicit player-facing entity fields, a player-visible parent name, and the game's visual guidance to build a shared player-facing image. It omits canonical fields and facts because fact knowledge is actor-specific. Entities without a player-facing name are explicitly skipped. Actor state includes illustration status and a scoped image URL when illustrated; authoritative state includes worker metadata and a trusted image URL when illustrated. The actor image route checks the same entity visibility rule as actor state. Since the service has no authentication, callers can supply any actor ID; deploy behind a trusted boundary.
+Entities may have an optional canonical `appearance` field for observable visual characteristics. It is separate from canonical `description`, which may contain GM-only information, and from the player projection's `description`. World patches can set `appearance` when creating or updating an entity; updates follow normal revision semantics.
+
+The illustration worker uses the entity's kind, `appearance`, player-facing name when available (otherwise its canonical name), a player-visible parent name, and the game's visual guidance. It omits canonical `description`, facts, and player projection descriptions and properties. Missing `appearance` does not prevent the worker from asking the text model whether to illustrate. Illustration processing creates no world revision, and changing `appearance` does not regenerate an existing image. Actor state includes illustration status and a scoped image URL when illustrated; authoritative state includes worker metadata and a trusted image URL when illustrated. The actor image route checks the same entity visibility rule as actor state. Since the service has no authentication, callers can supply any actor ID; deploy behind a trusted boundary.
 
 ## Architecture and scope
 
