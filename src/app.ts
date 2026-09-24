@@ -6,6 +6,7 @@ import { DomainError } from "./errors.js";
 import { RealmService } from "./domain.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { IllustrationService, openAiIllustrator, openAiImageGenerator } from "./illustrations.js";
 
 const Id = Type.String({ minLength: 1, maxLength: 200 });
 const JsonObject = Type.Record(Type.String(), Type.Unknown());
@@ -34,9 +35,10 @@ const WorldPatchSchema = Type.Object({
   observations: Type.Optional(Type.Array(Type.Object({ actor_id: Id, entity_id: Id }, { additionalProperties: false })))
 }, { additionalProperties: false });
 
-export function buildApp(db: RealmDatabase): FastifyInstance {
+export function buildApp(db: RealmDatabase, assetDir = process.env.REALM_ILLUSTRATION_DIR ?? "illustrations"): FastifyInstance {
   const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>();
   const realm = new RealmService(db);
+  const illustrations = new IllustrationService(db, assetDir, openAiIllustrator(process.env.OPENAI_API_KEY ?? ""), openAiImageGenerator(process.env.OPENAI_API_KEY ?? ""));
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof DomainError) return reply.status(error.statusCode).send({ error: error.code, message: error.message });
@@ -74,8 +76,20 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
   const RuntimeBatch = Type.Object({ ...Mutation, changes: Type.Array(RuntimeChange, { minItems: 1, maxItems: 100 }) }, { additionalProperties: false });
   app.post("/games/:gameId/operations/batch", { schema: { params: GameParams, body: RuntimeBatch } }, async (r) => realm.applyRuntimeBatch(r.params.gameId, r.body));
 
-  app.get("/games/:gameId/state", { schema: { params: GameParams, querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } }, async (r) => realm.playerState(r.params.gameId, r.query.actor_id));
-  app.get("/games/:gameId/authoritative-state", { schema: { params: GameParams } }, async (r) => realm.authoritativeState(r.params.gameId));
+  app.get("/games/:gameId/state", { schema: { params: GameParams, querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } }, async (r) => {
+    const state = realm.playerState(r.params.gameId, r.query.actor_id);
+    return { ...state, entities: state.entities.map((entity) => ({ ...entity,
+      illustration: (() => { const metadata = illustrations.metadata(r.params.gameId, entity.id); return metadata.status === "illustrated"
+        ? { status: metadata.status, url: `/games/${encodeURIComponent(r.params.gameId)}/entities/${encodeURIComponent(entity.id)}/illustration?actor_id=${encodeURIComponent(r.query.actor_id)}` }
+        : { status: metadata.status }; })() })) };
+  });
+  app.get("/games/:gameId/authoritative-state", { schema: { params: GameParams } }, async (r) => {
+    const state = realm.authoritativeState(r.params.gameId);
+    return { ...state, entities: state.entities.map((entity) => ({ ...entity, illustration: illustrations.metadata(r.params.gameId, entity.id) })) };
+  });
+  app.get("/games/:gameId/entities/:entityId/illustration", { schema: { params: Type.Object({ gameId: Id, entityId: Id }), querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } },
+    async (r, reply) => reply.type("image/png").header("Cache-Control", "private, no-store")
+      .send(await illustrations.image(r.params.gameId, r.params.entityId, r.query.actor_id)));
   app.get("/games/:gameId/revisions", { schema: { params: GameParams } }, async (r) => realm.revisions(r.params.gameId));
   app.get("/games/:gameId/revisions/:revision/events", { schema: { params: Type.Object({ gameId: Id, revision: Type.Integer({ minimum: 1 }) }) } }, async (r) => realm.events(r.params.gameId, r.params.revision));
   return app;
