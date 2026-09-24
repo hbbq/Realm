@@ -41,6 +41,13 @@ export interface KnowledgeInput { actor_id: string; fact_id: string }
 export interface ObservationInput { actor_id: string; entity_id: string }
 
 export interface MutationRequest { expected_revision: number; idempotency_key: string }
+export type RuntimeChange =
+  | { type: "move"; entity_id: string; destination_id: string }
+  | { type: "establish_fact"; id?: string; text: string; subject_entity_id?: string; metadata?: Record<string, unknown> }
+  | { type: "reveal_fact"; actor_id: string; fact_id: string }
+  | { type: "observe_entity"; actor_id: string; entity_id: string }
+  | { type: "advance_time"; minutes: number };
+export interface RuntimeBatch extends MutationRequest { changes: RuntimeChange[] }
 export interface WorldPatch extends MutationRequest {
   entities?: EntityInput[];
   entity_updates?: EntityUpdate[];
@@ -52,4 +59,8 @@ export interface WorldPatch extends MutationRequest {
 }
 
 export interface StoredEvent { ordinal: number; type: string; payload: Record<string, unknown> }
-export interface MutationResult { revision: number; revision_id: string; events: StoredEvent[]; idempotent: boolean }
+export interface MutationResult {
+  revision: number; revision_id: string; events: StoredEvent[]; idempotent: boolean;
+  world_time_minutes?: number;
+  created_facts?: { change_index: number; fact_id: string }[];
+}
