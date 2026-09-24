@@ -363,3 +363,133 @@ test("idempotency keys are bound to mutation kind and stable request payload", a
   assert.equal(state.game.world_time_minutes, 0);
   assert.equal(state.entities[0].name, "Actor");
 });
+
+test("runtime batch commits ordered dependent changes in one revision and retries exactly", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "seed", entities: [
+      { id: "actor", kind: "creature", name: "Actor" },
+      { id: "room-a", kind: "place", name: "A" },
+      { id: "room-b", kind: "place", name: "B" },
+      { id: "item", kind: "item", name: "Item" }
+    ], containment: [{ child_id: "actor", parent_id: "room-a" }, { child_id: "item", parent_id: "actor" }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+  const payload = { expected_revision: 1, idempotency_key: "scene", changes: [
+    { type: "move", entity_id: "actor", destination_id: "room-b" },
+    { type: "move", entity_id: "item", destination_id: "room-b" },
+    { type: "establish_fact", id: "clue", text: "A clue", subject_entity_id: "item" },
+    { type: "reveal_fact", actor_id: "actor", fact_id: "clue" },
+    { type: "observe_entity", actor_id: "actor", entity_id: "item" },
+    { type: "advance_time", minutes: 3 }
+  ] };
+  const result = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload });
+  assert.equal(result.statusCode, 200, result.body);
+  assert.equal(result.json().revision, 2);
+  assert.equal(result.json().world_time_minutes, 3);
+  assert.deepEqual(result.json().created_facts, [{ change_index: 2, fact_id: "clue" }]);
+  assert.deepEqual(result.json().events.map((event: any) => event.type),
+    ["EntityMoved", "EntityMoved", "FactEstablished", "FactRevealed", "EntityObserved", "TimeAdvanced"]);
+  assert.deepEqual(result.json().events.map((event: any) => event.ordinal), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(result.json().events.map((event: any) => event.payload.change_index), [0, 1, 2, 3, 4, 5]);
+  const events = (await app.inject({ method: "GET", url: `/games/${gameId}/revisions/2/events` })).json();
+  assert.deepEqual(events.map((event: any) => event.type), result.json().events.map((event: any) => event.type));
+  const revisions = (await app.inject({ method: "GET", url: `/games/${gameId}/revisions` })).json();
+  assert.deepEqual(revisions.map((revision: any) => revision.mutation_kind), ["world_patch", "runtime_batch"]);
+  const state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.knowledge[0].learned_revision, 2);
+  assert.equal(state.observations[0].observed_revision, 2);
+
+  const later = await app.inject({ method: "POST", url: `/games/${gameId}/operations/advance-time`, payload: {
+    expected_revision: 2, idempotency_key: "later", minutes: 1
+  }});
+  assert.equal(later.statusCode, 200, later.body);
+  const retry = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload });
+  assert.equal(retry.statusCode, 200, retry.body);
+  assert.deepEqual(retry.json(), { ...result.json(), idempotent: true });
+  const reused = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    ...payload, changes: [...payload.changes].reverse()
+  }});
+  assert.equal(reused.statusCode, 409);
+  assert.equal(reused.json().error, "IDEMPOTENCY_KEY_REUSED");
+});
+
+test("runtime batch rolls back a later invalid step and preserves no-op semantics", async () => {
+  const { app } = harness();
+  const gameId = await createGame(app);
+  const otherId = await createGame(app);
+  const seed = await app.inject({ method: "POST", url: `/games/${gameId}/world-patches`, payload: {
+    expected_revision: 0, idempotency_key: "seed", entities: [
+      { id: "actor", kind: "creature", name: "Actor" }, { id: "room", kind: "place", name: "Room" }
+    ], containment: [{ child_id: "actor", parent_id: "room" }]
+  }});
+  assert.equal(seed.statusCode, 201, seed.body);
+  const bad = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 1, idempotency_key: "bad", changes: [
+      { type: "establish_fact", id: "temporary", text: "Temporary" },
+      { type: "advance_time", minutes: 5 },
+      { type: "move", entity_id: "room", destination_id: "actor" }
+    ]
+  }});
+  assert.equal(bad.statusCode, 400);
+  assert.equal(bad.json().error, "CONTAINMENT_CYCLE");
+  let state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.game.current_revision, 1);
+  assert.equal(state.game.world_time_minutes, 0);
+  assert.deepEqual(state.facts, []);
+  const crossGame = await app.inject({ method: "POST", url: `/games/${otherId}/operations/batch`, payload: {
+    expected_revision: 0, idempotency_key: "cross", changes: [
+      { type: "advance_time", minutes: 2 }, { type: "observe_entity", actor_id: "actor", entity_id: "room" }
+    ]
+  }});
+  assert.equal(crossGame.statusCode, 400);
+  assert.equal((await app.inject({ method: "GET", url: `/games/${otherId}/authoritative-state` })).json().game.world_time_minutes, 0);
+  const stale = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 0, idempotency_key: "stale", changes: [{ type: "advance_time", minutes: 1 }]
+  }});
+  assert.equal(stale.statusCode, 409);
+  assert.equal(stale.json().error, "REVISION_CONFLICT");
+  const noop = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 1, idempotency_key: "noop", changes: [
+      { type: "move", entity_id: "actor", destination_id: "room" },
+      { type: "observe_entity", actor_id: "actor", entity_id: "room" },
+      { type: "observe_entity", actor_id: "actor", entity_id: "room" }
+    ]
+  }});
+  assert.equal(noop.statusCode, 200, noop.body);
+  assert.equal(noop.json().revision, 2);
+  assert.deepEqual(noop.json().events.map((event: any) => event.type), ["EntityObserved"]);
+  assert.equal(noop.json().events[0].payload.change_index, 1);
+  const allNoop = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 2, idempotency_key: "all-noop", changes: [
+      { type: "move", entity_id: "actor", destination_id: "room" },
+      { type: "observe_entity", actor_id: "actor", entity_id: "room" }
+    ]
+  }});
+  assert.equal(allNoop.statusCode, 200, allNoop.body);
+  assert.equal(allNoop.json().revision, 2);
+  assert.deepEqual(allNoop.json().events, []);
+  assert.equal(allNoop.json().world_time_minutes, 0);
+  assert.deepEqual(allNoop.json().created_facts, []);
+  const allNoopRetry = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 2, idempotency_key: "all-noop", changes: [
+      { type: "move", entity_id: "actor", destination_id: "room" },
+      { type: "observe_entity", actor_id: "actor", entity_id: "room" }
+    ]
+  }});
+  assert.deepEqual(allNoopRetry.json(), { ...allNoop.json(), idempotent: true });
+  const generated = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 2, idempotency_key: "generated", changes: [{ type: "establish_fact", text: "Generated ID" }]
+  }});
+  assert.equal(generated.statusCode, 200, generated.body);
+  assert.equal(generated.json().created_facts[0].change_index, 0);
+  assert.equal(generated.json().created_facts[0].fact_id, generated.json().events[0].payload.fact_id);
+  const invalid = await app.inject({ method: "POST", url: `/games/${gameId}/operations/batch`, payload: {
+    expected_revision: 3, idempotency_key: "invalid", changes: [{ type: "move", entity_id: "actor", to: "room" }]
+  }});
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(invalid.json().error, "INVALID_REQUEST");
+  state = (await app.inject({ method: "GET", url: `/games/${gameId}/authoritative-state` })).json();
+  assert.equal(state.game.current_revision, 3);
+});

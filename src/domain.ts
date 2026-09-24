@@ -2,7 +2,7 @@ import type { RealmDatabase } from "./database.js";
 import { createHash } from "node:crypto";
 import { DomainError, requireValue } from "./errors.js";
 import { newId } from "./ids.js";
-import type { MutationRequest, MutationResult, StoredEvent, WorldPatch } from "./types.js";
+import type { MutationRequest, MutationResult, RuntimeBatch, RuntimeChange, StoredEvent, WorldPatch } from "./types.js";
 
 type Row = Record<string, any>;
 type PendingEvent = { type: string; payload: Record<string, unknown> };
@@ -188,7 +188,10 @@ export class RealmService {
   }
 
   move(gameId: string, input: MutationRequest & { entity_id: string; destination_id: string }): MutationResult {
-    return this.mutate(gameId, "move", input, () => {
+    return this.mutate(gameId, "move", input, () => this.applyMove(gameId, input));
+  }
+
+  private applyMove(gameId: string, input: { entity_id: string; destination_id: string }): PendingEvent[] {
       const entity = this.entity(gameId, input.entity_id), destination = this.entity(gameId, input.destination_id);
       requireValue(entity, "ENTITY_NOT_FOUND", `entity not found: ${input.entity_id}`, 404);
       requireValue(destination, "ENTITY_NOT_FOUND", `destination not found: ${input.destination_id}`, 404);
@@ -203,51 +206,81 @@ export class RealmService {
       }
       this.db.prepare("INSERT INTO containment(game_id,child_entity_id,parent_entity_id) VALUES (?,?,?) ON CONFLICT(game_id,child_entity_id) DO UPDATE SET parent_entity_id=excluded.parent_entity_id").run(gameId, input.entity_id, input.destination_id);
       return [{ type: "EntityMoved", payload: { entity_id: input.entity_id, destination_id: input.destination_id } }];
-    });
   }
 
   revealFact(gameId: string, input: MutationRequest & { actor_id: string; fact_id: string }): MutationResult {
-    return this.mutate(gameId, "reveal_fact", input, (revision) => {
+    return this.mutate(gameId, "reveal_fact", input, (revision) => this.applyRevealFact(gameId, input, revision));
+  }
+
+  private applyRevealFact(gameId: string, input: { actor_id: string; fact_id: string }, revision: number): PendingEvent[] {
       const actor = this.entity(gameId, input.actor_id);
       requireValue(actor?.kind === "creature", "INVALID_ACTOR", "actor must be a creature", 400);
       const fact = this.db.prepare("SELECT 1 FROM facts WHERE game_id=? AND id=?").get(gameId, input.fact_id);
       requireValue(fact, "FACT_NOT_FOUND", `fact not found: ${input.fact_id}`, 404);
       const result = this.db.prepare("INSERT OR IGNORE INTO fact_knowledge(game_id,actor_entity_id,fact_id,learned_revision) VALUES (?,?,?,?)").run(gameId, input.actor_id, input.fact_id, revision);
       return result.changes > 0 ? [{ type: "FactRevealed", payload: { actor_id: input.actor_id, fact_id: input.fact_id } }] : [];
-    });
   }
 
   establishFact(gameId: string, input: MutationRequest & { id?: string; text: string; subject_entity_id?: string; metadata?: Record<string, unknown> }): MutationResult {
     requireValue(input.text?.trim(), "INVALID_FACT", "fact text is required");
-    return this.mutate(gameId, "establish_fact", input, () => {
+    return this.mutate(gameId, "establish_fact", input, () => this.applyEstablishFact(gameId, input));
+  }
+
+  private applyEstablishFact(gameId: string, input: { id?: string; text: string; subject_entity_id?: string; metadata?: Record<string, unknown> }): PendingEvent[] {
+      requireValue(input.text?.trim(), "INVALID_FACT", "fact text is required");
       const factId = input.id ?? newId();
       requireValue(!this.db.prepare("SELECT 1 FROM facts WHERE game_id=? AND id=?").get(gameId, factId), "DUPLICATE_FACT", `fact already exists: ${factId}`);
       if (input.subject_entity_id) requireValue(this.entity(gameId, input.subject_entity_id), "ENTITY_NOT_FOUND", `fact subject not found: ${input.subject_entity_id}`, 404);
       this.db.prepare("INSERT INTO facts(game_id,id,text,subject_entity_id,metadata_json) VALUES (?,?,?,?,?)")
         .run(gameId, factId, input.text.trim(), input.subject_entity_id ?? null, json(input.metadata));
       return [{ type: "FactEstablished", payload: { fact_id: factId } }];
-    });
   }
 
   observeEntity(gameId: string, input: MutationRequest & { actor_id: string; entity_id: string }): MutationResult {
-    return this.mutate(gameId, "observe_entity", input, (revision) => {
+    return this.mutate(gameId, "observe_entity", input, (revision) => this.applyObserveEntity(gameId, input, revision));
+  }
+
+  private applyObserveEntity(gameId: string, input: { actor_id: string; entity_id: string }, revision: number): PendingEvent[] {
       const actor = this.entity(gameId, input.actor_id);
       requireValue(actor?.kind === "creature", "INVALID_ACTOR", "actor must be a creature", 400);
       requireValue(this.entity(gameId, input.entity_id), "ENTITY_NOT_FOUND", `entity not found: ${input.entity_id}`, 404);
       const result = this.db.prepare("INSERT OR IGNORE INTO entity_observations(game_id,actor_entity_id,entity_id,observed_revision) VALUES (?,?,?,?)")
         .run(gameId, input.actor_id, input.entity_id, revision);
       return result.changes > 0 ? [{ type: "EntityObserved", payload: { actor_id: input.actor_id, entity_id: input.entity_id } }] : [];
-    });
   }
 
   advanceTime(gameId: string, input: MutationRequest & { minutes: number }): MutationResult {
     requireValue(Number.isSafeInteger(input.minutes) && input.minutes > 0, "INVALID_TIME_ADVANCE", "minutes must be a positive integer");
-    return this.mutate(gameId, "advance_time", input, () => {
+    return this.mutate(gameId, "advance_time", input, () => this.applyAdvanceTime(gameId, input));
+  }
+
+  private applyAdvanceTime(gameId: string, input: { minutes: number }): PendingEvent[] {
+      requireValue(Number.isSafeInteger(input.minutes) && input.minutes > 0, "INVALID_TIME_ADVANCE", "minutes must be a positive integer");
       const before = (this.game(gameId).world_time_minutes as number);
       const after = before + input.minutes;
       this.db.prepare("UPDATE games SET world_time_minutes=? WHERE id=?").run(after, gameId);
       return [{ type: "TimeAdvanced", payload: { minutes: input.minutes, from: before, to: after } }];
-    });
+  }
+
+  applyRuntimeBatch(gameId: string, input: RuntimeBatch): MutationResult {
+    requireValue(Array.isArray(input.changes) && input.changes.length > 0 && input.changes.length <= 100,
+      "INVALID_BATCH", "changes must contain between 1 and 100 operations");
+    const createdFacts: { change_index: number; fact_id: string }[] = [];
+    return this.mutate(gameId, "runtime_batch", input, (revision) => input.changes.flatMap((change, change_index) => {
+      const events = this.applyRuntimeChange(gameId, change, revision);
+      if (change.type === "establish_fact") createdFacts.push({ change_index, fact_id: events[0].payload.fact_id as string });
+      return events.map((event) => ({ ...event, payload: { ...event.payload, change_index } }));
+    }), () => ({ world_time_minutes: this.game(gameId).world_time_minutes as number, created_facts: createdFacts }));
+  }
+
+  private applyRuntimeChange(gameId: string, change: RuntimeChange, revision: number): PendingEvent[] {
+    switch (change.type) {
+      case "move": return this.applyMove(gameId, change);
+      case "establish_fact": return this.applyEstablishFact(gameId, change);
+      case "reveal_fact": return this.applyRevealFact(gameId, change, revision);
+      case "observe_entity": return this.applyObserveEntity(gameId, change, revision);
+      case "advance_time": return this.applyAdvanceTime(gameId, change);
+    }
   }
 
   authoritativeState(gameId: string) {
@@ -298,7 +331,7 @@ export class RealmService {
       .map((r) => ({ ordinal: r.ordinal, type: r.type, payload: parse(r.payload_json), created_at: r.created_at }));
   }
 
-  private mutate(gameId: string, kind: string, request: MutationRequest, change: (revision: number) => PendingEvent[]): MutationResult {
+  private mutate(gameId: string, kind: string, request: MutationRequest, change: (revision: number) => PendingEvent[], details?: () => Partial<MutationResult>): MutationResult {
     requireValue(Number.isSafeInteger(request.expected_revision) && request.expected_revision >= 0, "INVALID_EXPECTED_REVISION", "expected_revision must be a non-negative integer");
     requireValue(typeof request.idempotency_key === "string" && request.idempotency_key.trim().length > 0, "INVALID_IDEMPOTENCY_KEY", "idempotency_key is required");
     const requestFingerprint = fingerprint(request);
@@ -316,8 +349,8 @@ export class RealmService {
       const revisionId = newId(), now = new Date().toISOString();
       const events = change(revision);
       if (events.length === 0) {
-        const current = this.db.prepare("SELECT id FROM revisions WHERE game_id=? AND revision_number=?").get(gameId, game.current_revision) as Row;
-        const result = { revision: game.current_revision, revision_id: current.id, events: [], idempotent: false };
+        const current = this.db.prepare("SELECT id FROM revisions WHERE game_id=? AND revision_number=?").get(gameId, game.current_revision) as Row | undefined;
+        const result: MutationResult = { revision: game.current_revision, revision_id: current?.id ?? "", events: [], idempotent: false, ...details?.() };
         this.recordIdempotency(gameId, request.idempotency_key, kind, requestFingerprint, result, now);
         return result;
       }
@@ -326,7 +359,7 @@ export class RealmService {
       const insertEvent = this.db.prepare("INSERT INTO events(game_id,revision_number,ordinal,type,payload_json,created_at) VALUES (?,?,?,?,?,?)");
       events.forEach((event, ordinal) => insertEvent.run(gameId, revision, ordinal, event.type, json(event.payload), now));
       this.db.prepare("UPDATE games SET current_revision=? WHERE id=?").run(revision, gameId);
-      const result = this.mutationResult(gameId, revision, revisionId, false);
+      const result = { ...this.mutationResult(gameId, revision, revisionId, false), ...details?.() };
       this.recordIdempotency(gameId, request.idempotency_key, kind, requestFingerprint, result, now);
       return result;
     });

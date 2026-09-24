@@ -64,6 +64,15 @@ export function buildApp(db: RealmDatabase): FastifyInstance {
   app.post("/games/:gameId/operations/observe-entity", { schema: { params: GameParams, body: Observe } }, async (r) => realm.observeEntity(r.params.gameId, r.body));
   const Establish = Type.Object({ ...Mutation, id: Type.Optional(Id), text: Type.String({ minLength: 1 }), subject_entity_id: Type.Optional(Id), metadata: Type.Optional(JsonObject) }, { additionalProperties: false });
   app.post("/games/:gameId/operations/establish-fact", { schema: { params: GameParams, body: Establish } }, async (r) => realm.establishFact(r.params.gameId, r.body));
+  const RuntimeChange = Type.Union([
+    Type.Object({ type: Type.Literal("move"), entity_id: Id, destination_id: Id }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("establish_fact"), id: Type.Optional(Id), text: Type.String({ minLength: 1 }), subject_entity_id: Type.Optional(Id), metadata: Type.Optional(JsonObject) }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("reveal_fact"), actor_id: Id, fact_id: Id }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("observe_entity"), actor_id: Id, entity_id: Id }, { additionalProperties: false }),
+    Type.Object({ type: Type.Literal("advance_time"), minutes: Type.Integer({ minimum: 1 }) }, { additionalProperties: false })
+  ]);
+  const RuntimeBatch = Type.Object({ ...Mutation, changes: Type.Array(RuntimeChange, { minItems: 1, maxItems: 100 }) }, { additionalProperties: false });
+  app.post("/games/:gameId/operations/batch", { schema: { params: GameParams, body: RuntimeBatch } }, async (r) => realm.applyRuntimeBatch(r.params.gameId, r.body));
 
   app.get("/games/:gameId/state", { schema: { params: GameParams, querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } }, async (r) => realm.playerState(r.params.gameId, r.query.actor_id));
   app.get("/games/:gameId/authoritative-state", { schema: { params: GameParams } }, async (r) => realm.authoritativeState(r.params.gameId));

@@ -32,6 +32,7 @@ The API is intentionally split into trusted authoring/inspection routes and acto
 | `POST` | `/games/:id/operations/establish-fact` | Add canonical truth |
 | `POST` | `/games/:id/operations/reveal-fact` | Grant an actor knowledge of a fact |
 | `POST` | `/games/:id/operations/observe-entity` | Record that an actor may see an entity in player projections |
+| `POST` | `/games/:id/operations/batch` | Apply ordered runtime changes in one atomic transition |
 | `GET` | `/games/:id/state?actor_id=...` | Read a player-safe projection |
 | `GET` | `/games/:id/authoritative-state` | Inspect trusted canonical state |
 | `GET` | `/games/:id/revisions` | List mutation revisions |
@@ -40,6 +41,25 @@ The API is intentionally split into trusted authoring/inspection routes and acto
 Every mutation body includes `expected_revision` and `idempotency_key`. A stale revision returns HTTP 409. Retrying a completed key returns its original result and does not apply the change twice.
 
 WorldPatch references may use persisted IDs or request-local `ref` values. Created-record events return each supplied `ref` with its durable ID. Realm resolves the whole proposed graph, checks references, place connection endpoints, creature actors, single-parent containment, and cycles, then commits state, one revision, and its events in one SQLite transaction.
+
+The trusted batch route accepts one `expected_revision`, one `idempotency_key`, and `changes` containing 1–100 ordered operations. Each change has a `type` of `move` (`entity_id`, `destination_id`), `establish_fact` (`text`, optional `id`, `subject_entity_id`, `metadata`), `reveal_fact` (`actor_id`, `fact_id`), `observe_entity` (`actor_id`, `entity_id`), or `advance_time` (`minutes`). The individual operation routes remain available. Changes run in order against the state produced by earlier changes, so a fact with an explicit `id` may be established and then revealed in the same batch. Each step uses its single-operation validation, including sequential containment cycle checks. A failed step rolls back all earlier steps. WorldPatch remains a separate operation.
+
+For example:
+
+```json
+{
+  "expected_revision": 4,
+  "idempotency_key": "scene-5",
+  "changes": [
+    { "type": "move", "entity_id": "mara", "destination_id": "abbey" },
+    { "type": "establish_fact", "id": "clue", "text": "Mara saw the visitor." },
+    { "type": "reveal_fact", "actor_id": "elin", "fact_id": "clue" },
+    { "type": "advance_time", "minutes": 3 }
+  ]
+}
+```
+
+A successful batch returns one revision, its ordered events, `world_time_minutes`, and `created_facts` entries with the zero-based `change_index` and durable `fact_id`. Each batch event payload also includes its `change_index`, so events remain attributable when some steps are unchanged. A retry with the same key and ordered request returns the stored result with `idempotent: true`, even after later revisions. Changing or reordering steps under the same key returns HTTP 409. Unchanged steps emit no event; a wholly unchanged batch keeps the current revision. The batch response is authoritative and may include hidden facts, so only trusted clients should use it.
 
 ## Visibility contract
 
