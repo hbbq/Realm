@@ -118,6 +118,14 @@ export class IllustrationService {
       (SELECT 1 FROM entity_observations o WHERE o.game_id=e.game_id AND o.actor_entity_id=? AND o.entity_id=e.id))`)
       .get(actorId, gameId, entityId, actorId, actorId);
     if (!visible) throw new DomainError(404, "ILLUSTRATION_NOT_FOUND", "illustration not found");
+    return this.loadImage(gameId, entityId);
+  }
+
+  async authoritativeImage(gameId: string, entityId: string): Promise<Buffer> {
+    return this.loadImage(gameId, entityId);
+  }
+
+  private async loadImage(gameId: string, entityId: string): Promise<Buffer> {
     const row = this.db.prepare(`SELECT a.storage_key FROM entity_illustrations i JOIN illustration_assets a ON a.id=i.asset_id
       WHERE i.game_id=? AND i.entity_id=? AND i.status='illustrated'`).get(gameId, entityId) as Row | undefined;
     if (!row) throw new DomainError(404, "ILLUSTRATION_NOT_FOUND", "illustration not found");

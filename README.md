@@ -38,6 +38,7 @@ The API is intentionally split into trusted authoring/inspection routes and acto
 | `GET` | `/games/:id/state?actor_id=...` | Read a player-safe projection |
 | `GET` | `/games/:id/authoritative-state` | Inspect trusted canonical state |
 | `GET` | `/games/:id/entities/:entityId/illustration?actor_id=...` | Read an illustrated entity's image when visible to that actor |
+| `GET` | `/games/:id/entities/:entityId/authoritative-illustration` | Read an illustrated entity's image on the trusted inspection surface |
 | `GET` | `/games/:id/revisions` | List mutation revisions |
 | `GET` | `/games/:id/revisions/:number/events` | Inspect durable events for one revision |
 
@@ -78,7 +79,7 @@ The actor-scoped route is a purpose-built projection:
 
 This is deliberately smaller than a general ACL or per-field visibility system.
 
-The worker only uses explicit player-facing entity fields, a player-visible parent name, and the game's visual guidance to build a shared player-facing image. It omits canonical fields and facts because fact knowledge is actor-specific. Entities without a player-facing name are explicitly skipped. Actor state includes illustration status and a scoped image URL when illustrated; authoritative state includes worker metadata. The image route checks the same entity visibility rule as actor state. Since the service has no authentication, callers can supply any actor ID; deploy behind a trusted boundary.
+The worker only uses explicit player-facing entity fields, a player-visible parent name, and the game's visual guidance to build a shared player-facing image. It omits canonical fields and facts because fact knowledge is actor-specific. Entities without a player-facing name are explicitly skipped. Actor state includes illustration status and a scoped image URL when illustrated; authoritative state includes worker metadata and a trusted image URL when illustrated. The actor image route checks the same entity visibility rule as actor state. Since the service has no authentication, callers can supply any actor ID; deploy behind a trusted boundary.
 
 ## Architecture and scope
 

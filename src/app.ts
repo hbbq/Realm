@@ -85,11 +85,19 @@ export function buildApp(db: RealmDatabase, assetDir = process.env.REALM_ILLUSTR
   });
   app.get("/games/:gameId/authoritative-state", { schema: { params: GameParams } }, async (r) => {
     const state = realm.authoritativeState(r.params.gameId);
-    return { ...state, entities: state.entities.map((entity) => ({ ...entity, illustration: illustrations.metadata(r.params.gameId, entity.id) })) };
+    return { ...state, entities: state.entities.map((entity) => {
+      const metadata = illustrations.metadata(r.params.gameId, entity.id);
+      return { ...entity, illustration: metadata.status === "illustrated"
+        ? { ...metadata, url: `/games/${encodeURIComponent(r.params.gameId)}/entities/${encodeURIComponent(entity.id)}/authoritative-illustration` }
+        : metadata };
+    }) };
   });
   app.get("/games/:gameId/entities/:entityId/illustration", { schema: { params: Type.Object({ gameId: Id, entityId: Id }), querystring: Type.Object({ actor_id: Id }, { additionalProperties: false }) } },
     async (r, reply) => reply.type("image/png").header("Cache-Control", "private, no-store")
       .send(await illustrations.image(r.params.gameId, r.params.entityId, r.query.actor_id)));
+  app.get("/games/:gameId/entities/:entityId/authoritative-illustration", { schema: { params: Type.Object({ gameId: Id, entityId: Id }) } },
+    async (r, reply) => reply.type("image/png").header("Cache-Control", "private, no-store")
+      .send(await illustrations.authoritativeImage(r.params.gameId, r.params.entityId)));
   app.get("/games/:gameId/revisions", { schema: { params: GameParams } }, async (r) => realm.revisions(r.params.gameId));
   app.get("/games/:gameId/revisions/:revision/events", { schema: { params: Type.Object({ gameId: Id, revision: Type.Integer({ minimum: 1 }) }) } }, async (r) => realm.events(r.params.gameId, r.params.revision));
   return app;
