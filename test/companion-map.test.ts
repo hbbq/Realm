@@ -37,6 +37,35 @@ test("map groups direct and carried entities and uses place connections", () => 
   assert.match(diagram, /place_1 --> place_0/);
 });
 
+test("map shows items nested inside other items at any depth", () => {
+  const diagram = realmMapSource({
+    entities: [
+      { id: "room", kind: "place", name: "Room" },
+      { id: "actor", kind: "creature", name: "Actor" },
+      { id: "backpack", kind: "item", name: "Backpack" },
+      { id: "pouch", kind: "item", name: "Pouch" },
+      { id: "key", kind: "item", name: "Key" },
+      { id: "chest", kind: "item", name: "Chest" },
+      { id: "coin", kind: "item", name: "Coin" }
+    ],
+    containment: [
+      { child_entity_id: "actor", parent_entity_id: "room" },
+      { child_entity_id: "backpack", parent_entity_id: "actor" },
+      { child_entity_id: "pouch", parent_entity_id: "backpack" },
+      { child_entity_id: "key", parent_entity_id: "pouch" },
+      { child_entity_id: "chest", parent_entity_id: "room" },
+      { child_entity_id: "coin", parent_entity_id: "chest" }
+    ],
+    connections: []
+  });
+  assert.match(diagram, /entity_1 --- entity_2/);
+  assert.match(diagram, /entity_2 --- entity_3/);
+  assert.match(diagram, /entity_3 --- entity_4/);
+  assert.match(diagram, /entity_5 --- entity_6/);
+  assert.match(diagram, /entity_4\["item#58; Key"\]/);
+  assert.doesNotMatch(diagram, /empty_place_0/);
+});
+
 test("map encodes names and uses only the selected projection", () => {
   const diagram = realmMapSource({
     entities: [
