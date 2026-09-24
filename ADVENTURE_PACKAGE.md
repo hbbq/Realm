@@ -39,6 +39,24 @@ Realm. When the person becomes relevant, Keeper can materialize the necessary
 state. A more tightly prepared adventure can provide much more prepared
 material without requiring all of it to exist in Realm from the beginning.
 
+## Entity presentation and appearance
+
+Prepared and established entities may provide an optional `appearance`.
+This describes observable visual characteristics of the entity and is distinct
+from both its canonical `description` and any player-projection description.
+
+For authored/prepared entities, `appearance` is recommended whenever the
+source material gives meaningful visual information. It should capture useful
+visual identity rather than invent filler merely to populate the field.
+
+Realm may use `appearance` as safe visual context for presentation features
+such as entity illustrations. A canonical `description` may contain GM-only
+facts or other non-visual information and should not be treated as a substitute
+for `appearance`.
+
+An entity may still be valid without an `appearance`. Emergent entities can
+gain one later if their visual identity becomes established during play.
+
 ## Responsibilities
 
 **Keeper** owns semantic interpretation, improvisation, adjudication, and
