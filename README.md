@@ -1,6 +1,6 @@
 # Realm v1 vertical slice
 
-Realm is a small standalone HTTP service for authoritative role-playing world state. This slice proves the state boundaries in [VISION.md](VISION.md) and [STATE_MODEL.md](STATE_MODEL.md) without Keeper, Resident, or any AI dependency. A minimal read-only Web Companion is included for inspection.
+Realm is a small standalone HTTP service for authoritative role-playing world state. This slice proves the state boundaries in [VISION.md](VISION.md) and [STATE_MODEL.md](STATE_MODEL.md) without Keeper or Resident. Optional illustration generation uses OpenAI independently of gameplay. A minimal read-only Web Companion is included for inspection.
 
 ## Run
 
@@ -14,6 +14,8 @@ REALM_DATABASE=realm.sqlite npm start
 ```
 
 The server listens on `127.0.0.1:3000` by default. `HOST` and `PORT` override this. SQL migrations in `migrations/` run at startup.
+
+Entity illustration generation is optional and disabled by default. Set `REALM_ILLUSTRATIONS_ENABLED=true` and `OPENAI_API_KEY` to run one background job at a time inside Realm. `REALM_ILLUSTRATION_DIR` selects the persistent image directory (default `illustrations`); back it up together with the SQLite database. `REALM_ILLUSTRATION_TEXT_MODEL` and `REALM_ILLUSTRATION_IMAGE_MODEL` override the default text and image models. A game definition may contain `illustration: { "enabled": true, "style": "...", "policy": "..." }`; `enabled: false` excludes that game. Existing entities enter the pending queue automatically. Interrupted jobs are reclaimed after five minutes; failures retry with exponential delay up to five attempts. Generated images do not change world revisions or facts. The first slice keeps one active image per entity and does not regenerate after edits. Without an API key Realm still serves gameplay and previously generated assets.
 
 Open `http://127.0.0.1:3000/companion` to inspect a game. Select a game, then choose **All** for authoritative state or a creature actor for Realm's player projection. The Map tab shows places, contents, and connections from the selected state; it loads Mermaid from jsDelivr, so the map needs internet access. The revision list loads each revision's events when opened. The companion and history are trusted developer/GM surfaces and expose hidden canon; the service has no authentication. Serve it only in a trusted environment.
 
@@ -35,6 +37,8 @@ The API is intentionally split into trusted authoring/inspection routes and acto
 | `POST` | `/games/:id/operations/batch` | Apply ordered runtime changes in one atomic transition |
 | `GET` | `/games/:id/state?actor_id=...` | Read a player-safe projection |
 | `GET` | `/games/:id/authoritative-state` | Inspect trusted canonical state |
+| `GET` | `/games/:id/entities/:entityId/illustration?actor_id=...` | Read an illustrated entity's image when visible to that actor |
+| `GET` | `/games/:id/entities/:entityId/authoritative-illustration` | Read an illustrated entity's image on the trusted inspection surface |
 | `GET` | `/games/:id/revisions` | List mutation revisions |
 | `GET` | `/games/:id/revisions/:number/events` | Inspect durable events for one revision |
 
@@ -75,6 +79,8 @@ The actor-scoped route is a purpose-built projection:
 
 This is deliberately smaller than a general ACL or per-field visibility system.
 
+The worker only uses explicit player-facing entity fields, a player-visible parent name, and the game's visual guidance to build a shared player-facing image. It omits canonical fields and facts because fact knowledge is actor-specific. Entities without a player-facing name are explicitly skipped. Actor state includes illustration status and a scoped image URL when illustrated; authoritative state includes worker metadata and a trusted image URL when illustrated. The actor image route checks the same entity visibility rule as actor state. Since the service has no authentication, callers can supply any actor ID; deploy behind a trusted boundary.
+
 ## Architecture and scope
 
 The service is a modular monolith: Fastify and TypeBox handle JSON/HTTP validation, `RealmService` owns commands and invariants, and `better-sqlite3` owns persistence. SQLite keeps deployment and transaction behavior simple for a single small service. WAL mode, foreign keys, a busy timeout, optimistic revision checks, and short transactions provide an adequate v1 concurrency model. A higher-write deployment can later replace the persistence adapter. Versioned raw SQL migrations keep composite keys and constraints explicit and avoid adding an ORM abstraction before the query model warrants one.
@@ -83,9 +89,9 @@ State tables are the current read model. Append-only revision and event tables p
 
 Facts use text, an optional entity subject, and metadata. Entity properties are a constrained JSON extension point. This avoids committing v1 to a universal ontology or component engine while relational tables enforce the invariants the Greyfen scenario needs.
 
-Included now: games, place/creature/item entities, containment, place connections, facts, actor knowledge, observations, atomic WorldPatch, move/reveal/observe/establish/time operations, revisions, events, world time, and isolated game scope.
+Included now: games, place/creature/item entities, containment, place connections, facts, actor knowledge, observations, atomic WorldPatch, move/reveal/observe/establish/time operations, revisions, events, world time, isolated game scope, and optional entity illustrations.
 
-Deferred: authentication, generic components, factions, situations, beliefs, schedules, portals and locks, ownership, combat, rules and dice, rollback, replay, branching, richer visibility, a richer companion UI, Resident, Keeper, and AI integration.
+Deferred: authentication, generic components, factions, situations, beliefs, schedules, portals and locks, ownership, combat, rules and dice, rollback, replay, branching, richer visibility, Resident, Keeper, and other AI integration.
 
 ## Tests
 
