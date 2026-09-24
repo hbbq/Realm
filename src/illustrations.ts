@@ -44,14 +44,14 @@ export class IllustrationService {
   }
 
   private context(claim: Claim): Record<string, unknown> | undefined {
-    const row = this.db.prepare(`SELECT e.kind,e.player_name,e.player_description,e.player_properties_json,
+    const row = this.db.prepare(`SELECT e.kind,e.name,e.player_name,e.player_description,e.player_properties_json,
       p.player_name AS location_name,g.definition_json FROM entities e JOIN games g ON g.id=e.game_id
       LEFT JOIN containment c ON c.game_id=e.game_id AND c.child_entity_id=e.id
       LEFT JOIN entities p ON p.game_id=c.game_id AND p.id=c.parent_entity_id AND p.player_visible=1
       WHERE e.game_id=? AND e.id=?`).get(claim.game_id, claim.entity_id) as Row | undefined;
-    if (!row?.player_name?.trim()) return undefined;
+    if (!row) return undefined;
     const guidance = JSON.parse(row.definition_json).illustration || {};
-    return { entity: { kind: row.kind, name: row.player_name.slice(0, 500),
+    return { entity: { kind: row.kind, name: (row.player_name?.trim() ? row.player_name : row.name).slice(0, 500),
       description: (row.player_description ?? "").slice(0, 2000),
       properties: JSON.stringify(JSON.parse(row.player_properties_json)).slice(0, 1000) },
       location: row.location_name?.slice(0, 500) ?? null,
@@ -81,7 +81,7 @@ export class IllustrationService {
     let path: string | undefined;
     try {
       const context = this.context(claim);
-      if (!context) { this.finish(claim, "skipped", "No player-facing name"); return true; }
+      if (!context) { this.finish(claim, "skipped", "Entity no longer exists"); return true; }
       const decision = await this.decide(context);
       if (decision.action === "skip") { this.finish(claim, "skipped", decision.reason ?? null); return true; }
       if (decision.action !== "illustrate" || !decision.image_prompt?.trim() || decision.image_prompt.length > 4000)
