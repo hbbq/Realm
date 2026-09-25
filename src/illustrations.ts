@@ -153,7 +153,7 @@ export function openAiIllustrator(key: string): Illustrator {
 export function openAiImageGenerator(key: string): ImageGenerator {
   return async (prompt) => {
     const result = await postJson("https://api.openai.com/v1/images/generations", key, {
-      model: process.env.REALM_ILLUSTRATION_IMAGE_MODEL ?? "gpt-image-1", prompt, size: "1024x1024", output_format: "png"
+      model: process.env.REALM_ILLUSTRATION_IMAGE_MODEL ?? "gpt-image-2.5-flare", prompt, size: "1024x1024", output_format: "png"
     });
     const encoded = result.data?.[0]?.b64_json;
     if (typeof encoded !== "string") throw new Error("Images API returned no image");
